@@ -316,7 +316,9 @@ pub async fn fetch_and_cache_spec(list_id: &str) -> Result<ApiSpec> {
 
     // Scrape the openapi page for swaggerUrl
     let page_url = format!("https://www.data.go.kr/data/{list_id}/openapi.do");
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .user_agent("korea-cli/0.1.0")
+        .build()?;
     let html = client
         .get(&page_url)
         .send()

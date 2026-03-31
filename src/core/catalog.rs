@@ -228,11 +228,154 @@ pub fn search_catalog(
             title: svc.title.clone(),
             description: svc.description.clone(),
             org: svc.org_name.clone(),
-            operations: svc.operations.iter().map(|o| o.name.clone()).collect(),
-            auto_approve: svc.auto_approve,
+            category: svc.category.clone(),
             popularity: svc.request_count,
         })
         .collect();
 
     SearchResult { results, total }
+}
+
+/// Search bundle catalog entries by query string.
+pub fn search_bundle_catalog(
+    catalog: &[CatalogEntry],
+    query: &str,
+    category: Option<&str>,
+    limit: usize,
+) -> SearchResult {
+    let query_lower = query.to_lowercase();
+    let terms: Vec<&str> = query_lower.split_whitespace().collect();
+
+    let mut scored: Vec<(u32, &CatalogEntry)> = catalog
+        .iter()
+        .filter_map(|entry| {
+            if let Some(cat) = category {
+                if !entry.category.contains(cat) {
+                    return None;
+                }
+            }
+
+            let searchable = format!(
+                "{} {} {} {}",
+                entry.title.to_lowercase(),
+                entry.description.to_lowercase(),
+                entry.keywords.join(" ").to_lowercase(),
+                entry.org_name.to_lowercase(),
+            );
+
+            let match_count = terms.iter().filter(|t| searchable.contains(*t)).count();
+            if match_count > 0 {
+                let score = (match_count as u32) * 100 + entry.request_count;
+                Some((score, entry))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    let total = scored.len();
+    let results: Vec<SearchEntry> = scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, entry)| SearchEntry {
+            list_id: entry.list_id.clone(),
+            title: entry.title.clone(),
+            description: entry.description.clone(),
+            org: entry.org_name.clone(),
+            category: entry.category.clone(),
+            popularity: entry.request_count,
+        })
+        .collect();
+
+    SearchResult { results, total }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_search_bundle_catalog() {
+        let catalog = vec![
+            CatalogEntry {
+                list_id: "111".into(),
+                title: "기상청 단기예보".into(),
+                description: "날씨 예보 API".into(),
+                keywords: vec!["기상".into(), "날씨".into()],
+                org_name: "기상청".into(),
+                category: "과학기술".into(),
+                request_count: 500,
+            },
+            CatalogEntry {
+                list_id: "222".into(),
+                title: "사업자등록 조회".into(),
+                description: "사업자번호 진위확인".into(),
+                keywords: vec!["사업자".into()],
+                org_name: "국세청".into(),
+                category: "산업경제".into(),
+                request_count: 1000,
+            },
+        ];
+
+        let result = search_bundle_catalog(&catalog, "기상청", None, 10);
+        assert_eq!(result.total, 1);
+        assert_eq!(result.results[0].list_id, "111");
+        assert_eq!(result.results[0].category, "과학기술");
+    }
+
+    #[test]
+    fn test_search_bundle_catalog_category_filter() {
+        let catalog = vec![
+            CatalogEntry {
+                list_id: "111".into(),
+                title: "기상청 API".into(),
+                description: "".into(),
+                keywords: vec![],
+                org_name: "기상청".into(),
+                category: "과학기술".into(),
+                request_count: 100,
+            },
+            CatalogEntry {
+                list_id: "222".into(),
+                title: "기상 관련".into(),
+                description: "".into(),
+                keywords: vec![],
+                org_name: "환경부".into(),
+                category: "산업경제".into(),
+                request_count: 200,
+            },
+        ];
+
+        let result = search_bundle_catalog(&catalog, "기상", Some("과학기술"), 10);
+        assert_eq!(result.total, 1);
+        assert_eq!(result.results[0].list_id, "111");
+    }
+
+    #[test]
+    fn test_search_bundle_catalog_scoring() {
+        let catalog = vec![
+            CatalogEntry {
+                list_id: "111".into(),
+                title: "사업자 조회".into(),
+                description: "사업자 등록 상태 조회".into(),
+                keywords: vec!["사업자".into()],
+                org_name: "국세청".into(),
+                category: "".into(),
+                request_count: 100,
+            },
+            CatalogEntry {
+                list_id: "222".into(),
+                title: "사업자 등록 확인".into(),
+                description: "사업자 번호".into(),
+                keywords: vec!["사업자".into(), "등록".into()],
+                org_name: "국세청".into(),
+                category: "".into(),
+                request_count: 50,
+            },
+        ];
+
+        let result = search_bundle_catalog(&catalog, "사업자 등록", None, 10);
+        assert_eq!(result.total, 2);
+    }
 }

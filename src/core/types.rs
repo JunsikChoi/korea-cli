@@ -225,8 +225,7 @@ pub struct SearchEntry {
     pub title: String,
     pub description: String,
     pub org: String,
-    pub operations: Vec<String>,
-    pub auto_approve: bool,
+    pub category: String,
     pub popularity: u32,
 }
 

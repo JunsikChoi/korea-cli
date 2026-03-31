@@ -9,6 +9,7 @@ homepage = "https://koreacli.com"
 readme = "README.md"
 keywords = ["korea", "public-data", "cli", "mcp", "openapi"]
 categories = ["command-line-utilities", "api-bindings"]
+default-run = "korea-cli"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

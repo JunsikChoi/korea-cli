@@ -89,10 +89,8 @@ mod tests {
 
     #[test]
     fn test_load_embedded_bundle() {
-        // Embedded bundle is the placeholder from build.rs
+        // Embedded bundle is either placeholder (dev) or real (with data/bundle.zstd)
         let bundle = load_bundle().unwrap();
-        // Placeholder has version "placeholder" and empty catalog
-        assert_eq!(bundle.metadata.version, "placeholder");
-        assert!(bundle.catalog.is_empty());
+        assert!(!bundle.metadata.version.is_empty());
     }
 }

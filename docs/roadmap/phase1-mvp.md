@@ -49,11 +49,11 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 
 ## Phase 1.1: 안정화 (예정)
 
-### 0. 번들 전환 (스크래핑 → 사전 수집 데이터)
+### 0. 번들 전환 (스크래핑 → 사전 수집 데이터) ✅
 - [x] 번들 데이터 구조 설계 (카탈로그 + spec 통합) → `docs/superpowers/specs/2026-03-31-bundle-transition-design.md`
-- [ ] 번들 로드/조회 로직 구현 (기존 실시간 스크래핑 대체)
-- [ ] `korea-cli update` 번들 다운로드 뼈대
-- [ ] 초기 번들 생성 (수동 1회 수집)
+- [x] 번들 로드/조회 로직 구현 (기존 실시간 스크래핑 대체)
+- [x] `korea-cli update` 번들 다운로드 뼈대
+- [x] 초기 번들 생성 (수동 1회 수집) — 12,080 APIs + 5,363 specs, 2.77 MB
 
 ### 1. CI 수집 파이프라인
 - [ ] GitHub Actions 크론으로 data.go.kr 전체 Swagger spec 수집

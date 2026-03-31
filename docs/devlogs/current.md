@@ -118,4 +118,32 @@ Codex가 실제 API를 search → spec → call 흐름으로 사용하면서 다
 - **번들 크기 추정**: ~2-3 MB (raw 18MB → postcard 11MB → zstd 압축)
 
 ### 다음 작업
-- 번들 전환 구현 (플랜 Task 1~11)
+- ~~번들 전환 구현 (플랜 Task 1~11)~~ ✓
+
+---
+
+## 2026-03-31: 번들 전환 구현 완료
+
+### 완료
+- Bundle 타입 + postcard/zstd 직렬화 (Task 1)
+- build.rs placeholder 번들 자동 생성 (Task 2)
+- Bundle override path (Task 3)
+- Bundle loader + once_cell global static (Task 4)
+- extract_swagger_json 인라인 파싱 (Task 5)
+- search_bundle_catalog CatalogEntry 기반 검색 (Task 6)
+- CLI/MCP 번들 기반 전환 (Task 7)
+- Update command GitHub Releases 다운로드 (Task 8)
+- Bundle builder binary — 전체 API spec 수집 (Task 9)
+- 실제 번들 생성 + E2E 검증 (Task 10)
+- 레거시 스크래핑 코드 제거 + 문서 업데이트 (Task 11)
+
+### 핵심 결과
+- **12,080 API 카탈로그 + 5,363 Swagger 스펙** 번들 내장
+- 번들 크기: **2.77 MB** (postcard + zstd level 3)
+- 오프라인 search/spec 즉시 사용 가능
+- spec 수집률 44.4% (REST API가 아닌 데이터셋도 포함된 전체 목록 대비)
+
+### 다음 작업
+- CI 수집 파이프라인 (GitHub Actions cron)
+- spec 수집률 개선 (swaggerJson 패턴 외 추가 패턴 탐색)
+- Phase 1.1 호출 엔진 안정화 (XML, 인증 일반화)

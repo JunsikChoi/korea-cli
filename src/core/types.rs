@@ -1,6 +1,7 @@
 //! All shared data types for korea-cli.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ── Catalog types (lightweight, for search) ──
 
@@ -33,6 +34,34 @@ pub struct OperationSummary {
     pub name: String,
     pub request_params: Vec<String>,
     pub request_params_en: Vec<String>,
+}
+
+// ── Bundle types (pre-collected data for offline use) ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Bundle {
+    pub metadata: BundleMetadata,
+    pub catalog: Vec<CatalogEntry>,
+    pub specs: HashMap<String, ApiSpec>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BundleMetadata {
+    pub version: String,
+    pub api_count: usize,
+    pub spec_count: usize,
+    pub checksum: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogEntry {
+    pub list_id: String,
+    pub title: String,
+    pub description: String,
+    pub keywords: Vec<String>,
+    pub org_name: String,
+    pub category: String,
+    pub request_count: u32,
 }
 
 // ── API Spec types (detailed, from Swagger) ──
@@ -199,4 +228,56 @@ pub struct SearchEntry {
     pub operations: Vec<String>,
     pub auto_approve: bool,
     pub popularity: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bundle_postcard_roundtrip() {
+        let entry = CatalogEntry {
+            list_id: "12345".into(),
+            title: "Test API".into(),
+            description: "desc".into(),
+            keywords: vec!["test".into()],
+            org_name: "org".into(),
+            category: "cat".into(),
+            request_count: 100,
+        };
+        let bundle = Bundle {
+            metadata: BundleMetadata {
+                version: "2026-03-31".into(),
+                api_count: 1,
+                spec_count: 0,
+                checksum: "abc".into(),
+            },
+            catalog: vec![entry],
+            specs: HashMap::new(),
+        };
+        let bytes = postcard::to_allocvec(&bundle).unwrap();
+        let decoded: Bundle = postcard::from_bytes(&bytes).unwrap();
+        assert_eq!(decoded.catalog.len(), 1);
+        assert_eq!(decoded.catalog[0].title, "Test API");
+        assert_eq!(decoded.metadata.version, "2026-03-31");
+    }
+
+    #[test]
+    fn test_bundle_zstd_roundtrip() {
+        let bundle = Bundle {
+            metadata: BundleMetadata {
+                version: "test".into(),
+                api_count: 0,
+                spec_count: 0,
+                checksum: "".into(),
+            },
+            catalog: vec![],
+            specs: HashMap::new(),
+        };
+        let bytes = postcard::to_allocvec(&bundle).unwrap();
+        let compressed = zstd::encode_all(bytes.as_slice(), 3).unwrap();
+        let decompressed = zstd::decode_all(compressed.as_slice()).unwrap();
+        let decoded: Bundle = postcard::from_bytes(&decompressed).unwrap();
+        assert_eq!(decoded.metadata.version, "test");
+    }
 }

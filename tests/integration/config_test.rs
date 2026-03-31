@@ -37,3 +37,10 @@ fn test_no_key_returns_none() {
     let cfg = korea_cli::config::AppConfig::default();
     assert_eq!(cfg.resolve_api_key(), None);
 }
+
+#[test]
+fn test_bundle_override_path() {
+    let path = korea_cli::config::paths::bundle_override_file().unwrap();
+    assert!(path.to_str().unwrap().contains("korea-cli"));
+    assert!(path.to_str().unwrap().ends_with("bundle.zstd"));
+}

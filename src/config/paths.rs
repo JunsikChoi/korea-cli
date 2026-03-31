@@ -27,3 +27,7 @@ pub fn spec_cache_dir() -> anyhow::Result<PathBuf> {
 pub fn spec_cache_file(list_id: &str) -> anyhow::Result<PathBuf> {
     Ok(spec_cache_dir()?.join(format!("{list_id}.json")))
 }
+
+pub fn bundle_override_file() -> anyhow::Result<PathBuf> {
+    Ok(config_dir()?.join("bundle.zstd"))
+}

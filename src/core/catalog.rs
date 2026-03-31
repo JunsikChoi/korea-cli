@@ -100,28 +100,6 @@ fn parse_quoted_csv(s: &Option<String>) -> Vec<String> {
         .collect()
 }
 
-/// Load catalog from local JSON file.
-pub fn load_catalog() -> Result<Catalog> {
-    let path = crate::config::paths::catalog_file()?;
-    if path.exists() {
-        let content = std::fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&content)?)
-    } else {
-        Ok(Catalog {
-            services: Vec::new(),
-            updated_at: String::new(),
-        })
-    }
-}
-
-/// Save catalog to local JSON file.
-pub fn save_catalog(catalog: &Catalog) -> Result<()> {
-    let path = crate::config::paths::catalog_file()?;
-    let content = serde_json::to_string(catalog)?;
-    std::fs::write(&path, content)?;
-    Ok(())
-}
-
 /// Fetch all services from meta API with pagination.
 pub async fn fetch_all_services(api_key: &str) -> Result<Vec<ApiService>> {
     let client = reqwest::Client::new();
@@ -176,64 +154,6 @@ pub async fn fetch_all_services(api_key: &str) -> Result<Vec<ApiService>> {
     }
 
     Ok(merged.into_values().collect())
-}
-
-/// Search catalog by query string, optional category filter, and result limit.
-pub fn search_catalog(
-    catalog: &Catalog,
-    query: &str,
-    category: Option<&str>,
-    limit: usize,
-) -> SearchResult {
-    let query_lower = query.to_lowercase();
-    let terms: Vec<&str> = query_lower.split_whitespace().collect();
-
-    let mut scored: Vec<(u32, &ApiService)> = catalog
-        .services
-        .iter()
-        .filter_map(|svc| {
-            // Category filter
-            if let Some(cat) = category {
-                if !svc.category.contains(cat) {
-                    return None;
-                }
-            }
-
-            // Score: how many terms match across title, description, keywords, org
-            let searchable = format!(
-                "{} {} {} {}",
-                svc.title.to_lowercase(),
-                svc.description.to_lowercase(),
-                svc.keywords.join(" ").to_lowercase(),
-                svc.org_name.to_lowercase(),
-            );
-
-            let match_count = terms.iter().filter(|t| searchable.contains(*t)).count();
-            if match_count > 0 {
-                let score = (match_count as u32) * 100 + svc.request_count;
-                Some((score, svc))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
-    let total = scored.len();
-    let results: Vec<SearchEntry> = scored
-        .into_iter()
-        .take(limit)
-        .map(|(_, svc)| SearchEntry {
-            list_id: svc.list_id.clone(),
-            title: svc.title.clone(),
-            description: svc.description.clone(),
-            org: svc.org_name.clone(),
-            category: svc.category.clone(),
-            popularity: svc.request_count,
-        })
-        .collect();
-
-    SearchResult { results, total }
 }
 
 /// Search bundle catalog entries by query string.

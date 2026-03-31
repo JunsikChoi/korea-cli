@@ -13,9 +13,7 @@ use crate::core::types::Bundle;
 static EMBEDDED_BUNDLE: &[u8] = include_bytes!("../../data/bundle.zstd");
 
 /// Global bundle instance. Initialized once on first access.
-pub static BUNDLE: Lazy<Bundle> = Lazy::new(|| {
-    load_bundle().expect("Failed to load bundle")
-});
+pub static BUNDLE: Lazy<Bundle> = Lazy::new(|| load_bundle().expect("Failed to load bundle"));
 
 /// Load bundle with override chain: local file > embedded.
 pub fn load_bundle() -> Result<Bundle> {

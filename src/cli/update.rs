@@ -24,10 +24,7 @@ pub async fn run() -> Result<()> {
         );
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .context("번들 데이터 수신 실패")?;
+    let bytes = response.bytes().await.context("번들 데이터 수신 실패")?;
 
     // Verify the downloaded bundle is valid
     let bundle = crate::core::bundle::decompress_and_deserialize(&bytes)

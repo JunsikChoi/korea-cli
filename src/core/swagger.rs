@@ -1,10 +1,9 @@
 //! Swagger spec fetching, parsing, and caching.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use regex::Regex;
 use serde_json::Value;
 
-use crate::config::paths;
 use crate::core::types::*;
 
 /// Parse a Swagger 2.0 JSON spec into our normalized `ApiSpec`.
@@ -314,64 +313,6 @@ pub fn extract_swagger_url(html: &str) -> Option<String> {
     re.captures(html)
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().to_string())
-}
-
-/// Fetch Swagger spec from data.go.kr, parse, and cache locally.
-/// If a cached spec exists, returns that instead of re-fetching.
-pub async fn fetch_and_cache_spec(list_id: &str) -> Result<ApiSpec> {
-    // Check cache first
-    if let Some(cached) = load_cached_spec(list_id)? {
-        return Ok(cached);
-    }
-
-    // Scrape the openapi page for swaggerUrl
-    let page_url = format!("https://www.data.go.kr/data/{list_id}/openapi.do");
-    let client = reqwest::Client::builder()
-        .user_agent("korea-cli/0.1.0")
-        .build()?;
-    let html = client
-        .get(&page_url)
-        .send()
-        .await
-        .context("Failed to fetch openapi page")?
-        .text()
-        .await
-        .context("Failed to read openapi page body")?;
-
-    let swagger_url =
-        extract_swagger_url(&html).context("Could not find swaggerUrl in openapi page")?;
-
-    // Fetch the actual Swagger JSON
-    let spec_json: Value = client
-        .get(&swagger_url)
-        .send()
-        .await
-        .context("Failed to fetch Swagger spec")?
-        .json()
-        .await
-        .context("Failed to parse Swagger spec JSON")?;
-
-    // Parse into ApiSpec
-    let api_spec = parse_swagger(list_id, &spec_json)?;
-
-    // Cache to disk
-    let cache_path = paths::spec_cache_file(list_id)?;
-    let serialized = serde_json::to_string_pretty(&api_spec)?;
-    std::fs::write(&cache_path, serialized)?;
-
-    Ok(api_spec)
-}
-
-/// Load a cached spec from disk, if it exists.
-pub fn load_cached_spec(list_id: &str) -> Result<Option<ApiSpec>> {
-    let cache_path = paths::spec_cache_file(list_id)?;
-    if cache_path.exists() {
-        let content = std::fs::read_to_string(&cache_path)?;
-        let spec: ApiSpec = serde_json::from_str(&content)?;
-        Ok(Some(spec))
-    } else {
-        Ok(None)
-    }
 }
 
 #[cfg(test)]

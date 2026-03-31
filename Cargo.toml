@@ -34,3 +34,7 @@ path = "tests/integration/config_test.rs"
 [[test]]
 name = "catalog_test"
 path = "tests/integration/catalog_test.rs"
+
+[[test]]
+name = "swagger_test"
+path = "tests/integration/swagger_test.rs"

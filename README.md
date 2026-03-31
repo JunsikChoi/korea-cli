@@ -19,17 +19,23 @@
 
 ## 사용 예시
 
-### CLI로 직접 질의
+### CLI로 직접 사용
 
 ```bash
-$ korea-cli "서울 강남구 미세먼지 어때?"
-# → 에어코리아 대기질 API 자동 선택 → 호출 → 결과 정리
+# 카탈로그 업데이트 (최초 1회 필수)
+$ korea-cli update
 
-$ korea-cli "음식점 위생등급 조회하고 싶어"
-# → 적절한 API 추천 + 활용신청 URL 안내
+# API 검색
+$ korea-cli search "사업자등록"
+# → 12,000+ API 카탈로그에서 즉시 검색
 
-$ korea-cli search "대기질"
-# → 관련 API 목록 검색
+# API 상세 스펙 조회
+$ korea-cli spec 15081808
+# → 파라미터, 인증 방식, 엔드포인트 확인
+
+# API 직접 호출
+$ korea-cli call 15081808 /status --param 'b_no=["1234567890"]'
+# → JSON 응답 반환
 ```
 
 ### MCP 서버로 AI 도구에 연결
@@ -96,17 +102,21 @@ korea-cli config set api-key YOUR_API_KEY
 ### 3. 사용
 
 ```bash
-# 자연어로 데이터 조회
-korea-cli "서울 강남구 미세먼지"
+# API 카탈로그 업데이트 (최초 1회, 이후 수시로)
+korea-cli update
 
-# 어떤 API가 있는지 검색
+# API 검색
 korea-cli search "날씨"
+korea-cli search "공항" --category "교통"
+
+# API 스펙 확인
+korea-cli spec <list_id>
+
+# API 호출
+korea-cli call <list_id> <operation> --param key=value
 
 # MCP 서버로 AI 도구 연동
 korea-cli mcp
-
-# API 카탈로그 최신화
-korea-cli update
 ```
 
 ## 작동 방식

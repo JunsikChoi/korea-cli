@@ -7,43 +7,43 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 ## 마일스톤
 
 ### 1. 프로젝트 기반
-- [ ] 데이터 타입 정의 (ApiService, ApiSpec, ApiProtocol 등)
-- [ ] 설정 관리 (config.toml + 환경변수 `DATA_GO_KR_API_KEY`)
-- [ ] 모듈 구조 재편 (core/, cli/, mcp/, config/)
+- [x] 데이터 타입 정의 (ApiService, ApiSpec, ApiProtocol 등)
+- [x] 설정 관리 (config.toml + 환경변수 `DATA_GO_KR_API_KEY`)
+- [x] 모듈 구조 재편 (core/, cli/, mcp/, config/)
 
 ### 2. API 카탈로그
-- [ ] 메타 API로 전체 오픈 API 목록 수집 (페이지네이션)
-- [ ] 오퍼레이션→서비스(list_id) 그룹핑
-- [ ] 로컬 catalog.json 저장/로드
-- [ ] 텍스트 검색 (title, description, keywords, org 매칭)
-- [ ] `korea-cli update` / `korea-cli search` 명령
+- [x] 메타 API로 전체 오픈 API 목록 수집 (페이지네이션)
+- [x] 오퍼레이션→서비스(list_id) 그룹핑
+- [x] 로컬 catalog.json 저장/로드
+- [x] 텍스트 검색 (title, description, keywords, org 매칭)
+- [x] `korea-cli update` / `korea-cli search` 명령
 
 ### 3. Swagger 스펙 파싱
-- [ ] data.go.kr 상세페이지 스크래핑 (swaggerUrl 추출)
-- [ ] Swagger 2.0 JSON → 정규화된 ApiSpec 변환
-- [ ] 파라미터 타입/필수여부/HTTP 메서드 추출
-- [ ] 로컬 캐시 (cache/specs/{list_id}.json)
-- [ ] `korea-cli spec` 명령
+- [x] data.go.kr 상세페이지 스크래핑 (swaggerUrl 추출)
+- [x] Swagger 2.0 JSON → 정규화된 ApiSpec 변환
+- [x] 파라미터 타입/필수여부/HTTP 메서드 추출
+- [x] 로컬 캐시 (cache/specs/{list_id}.json)
+- [x] `korea-cli spec` 명령
 
 ### 4. API 호출 엔진
-- [ ] ApiSpec 기반 HTTP 요청 빌드 (GET query / POST JSON body)
-- [ ] 인증 주입 (serviceKey query param / Infuser header)
-- [ ] 응답 추출 (data_path 기반)
-- [ ] 구조화된 에러 응답 (action 필드 포함)
-- [ ] `korea-cli call` 명령
+- [x] ApiSpec 기반 HTTP 요청 빌드 (GET query / POST JSON body)
+- [x] 인증 주입 (serviceKey query param / Infuser header)
+- [x] 응답 추출 (data_path 기반)
+- [x] 구조화된 에러 응답 (action 필드 포함)
+- [x] `korea-cli call` 명령
 
 ### 5. MCP 서버
-- [ ] stdio JSON-RPC 2.0 프로토콜 (initialize, tools/list, tools/call)
-- [ ] search_api 도구 (카탈로그 검색)
-- [ ] get_api_spec 도구 (Swagger 파싱 → 스펙 반환)
-- [ ] call_api 도구 (API 호출 → 정규화된 응답)
+- [x] stdio JSON-RPC 2.0 프로토콜 (initialize, tools/list, tools/call)
+- [x] search_api 도구 (카탈로그 검색)
+- [x] get_api_spec 도구 (Swagger 파싱 → 스펙 반환)
+- [x] call_api 도구 (API 호출 → 정규화된 응답)
 - [ ] Claude Desktop / Cursor 연동 테스트
 
 ### 6. 마무리
-- [ ] 번들 카탈로그 (include_str! 빌드 시 포함)
-- [ ] 통합 테스트 (search → spec → call E2E)
-- [ ] README 업데이트
-- [ ] clippy + fmt 통과
+- [ ] 번들 카탈로그 (include_str! 빌드 시 포함) — 17MB로 과대, 향후 최적화 예정
+- [x] 통합 테스트 (search → spec → call E2E)
+- [x] README 업데이트
+- [x] clippy + fmt 통과
 
 ---
 

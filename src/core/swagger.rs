@@ -298,8 +298,18 @@ fn parse_response_fields(details: &Value) -> Vec<ResponseField> {
         .collect()
 }
 
+/// Extract inline Swagger JSON from data.go.kr page HTML.
+/// Matches: var swaggerJson = `{...}`  (backtick-quoted template literal)
+/// Returns parsed JSON, or None if not found.
+pub fn extract_swagger_json(html: &str) -> Option<serde_json::Value> {
+    let re = Regex::new(r"var\s+swaggerJson\s*=\s*`([^`]+)`").ok()?;
+    let caps = re.captures(html)?;
+    let json_str = caps.get(1)?.as_str();
+    serde_json::from_str(json_str).ok()
+}
+
 /// Extract swaggerUrl from the data.go.kr openapi page HTML.
-fn extract_swagger_url(html: &str) -> Option<String> {
+pub fn extract_swagger_url(html: &str) -> Option<String> {
     let re = Regex::new(r"var\s+swaggerUrl\s*=\s*'([^']+)'").ok()?;
     re.captures(html)
         .and_then(|caps| caps.get(1))
@@ -384,6 +394,37 @@ mod tests {
     fn test_extract_swagger_url_no_match() {
         let html = "no swagger url here";
         assert_eq!(extract_swagger_url(html), None);
+    }
+
+    #[test]
+    fn test_extract_swagger_json_inline() {
+        let html = r#"
+            some html content
+            var swaggerJson = `{"swagger":"2.0","info":{"title":"Test"},"host":"api.test.kr","basePath":"/api","schemes":["https"],"paths":{}}`
+            more content
+        "#;
+        let result = extract_swagger_json(html);
+        assert!(result.is_some());
+        let json = result.unwrap();
+        assert_eq!(json["swagger"].as_str(), Some("2.0"));
+        assert_eq!(json["host"].as_str(), Some("api.test.kr"));
+    }
+
+    #[test]
+    fn test_extract_swagger_json_not_found() {
+        let html = "no swagger data here";
+        assert!(extract_swagger_json(html).is_none());
+    }
+
+    #[test]
+    fn test_extract_swagger_json_preferred_over_url() {
+        let html = r#"
+            var swaggerUrl = 'https://example.com/spec';
+            var swaggerJson = `{"swagger":"2.0","info":{"title":"Inline"},"host":"inline.kr","basePath":"/","schemes":["https"],"paths":{}}`
+        "#;
+        let result = extract_swagger_json(html);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["host"].as_str(), Some("inline.kr"));
     }
 
     #[test]

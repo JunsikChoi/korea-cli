@@ -1,10 +1,9 @@
 //! Swagger spec fetching, parsing, and caching.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use regex::Regex;
 use serde_json::Value;
 
-use crate::config::paths;
 use crate::core::types::*;
 
 /// Parse a Swagger 2.0 JSON spec into our normalized `ApiSpec`.
@@ -298,70 +297,22 @@ fn parse_response_fields(details: &Value) -> Vec<ResponseField> {
         .collect()
 }
 
+/// Extract inline Swagger JSON from data.go.kr page HTML.
+/// Matches: var swaggerJson = `{...}`  (backtick-quoted template literal)
+/// Returns parsed JSON, or None if not found.
+pub fn extract_swagger_json(html: &str) -> Option<serde_json::Value> {
+    let re = Regex::new(r"var\s+swaggerJson\s*=\s*`([^`]+)`").ok()?;
+    let caps = re.captures(html)?;
+    let json_str = caps.get(1)?.as_str();
+    serde_json::from_str(json_str).ok()
+}
+
 /// Extract swaggerUrl from the data.go.kr openapi page HTML.
-fn extract_swagger_url(html: &str) -> Option<String> {
+pub fn extract_swagger_url(html: &str) -> Option<String> {
     let re = Regex::new(r"var\s+swaggerUrl\s*=\s*'([^']+)'").ok()?;
     re.captures(html)
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().to_string())
-}
-
-/// Fetch Swagger spec from data.go.kr, parse, and cache locally.
-/// If a cached spec exists, returns that instead of re-fetching.
-pub async fn fetch_and_cache_spec(list_id: &str) -> Result<ApiSpec> {
-    // Check cache first
-    if let Some(cached) = load_cached_spec(list_id)? {
-        return Ok(cached);
-    }
-
-    // Scrape the openapi page for swaggerUrl
-    let page_url = format!("https://www.data.go.kr/data/{list_id}/openapi.do");
-    let client = reqwest::Client::builder()
-        .user_agent("korea-cli/0.1.0")
-        .build()?;
-    let html = client
-        .get(&page_url)
-        .send()
-        .await
-        .context("Failed to fetch openapi page")?
-        .text()
-        .await
-        .context("Failed to read openapi page body")?;
-
-    let swagger_url =
-        extract_swagger_url(&html).context("Could not find swaggerUrl in openapi page")?;
-
-    // Fetch the actual Swagger JSON
-    let spec_json: Value = client
-        .get(&swagger_url)
-        .send()
-        .await
-        .context("Failed to fetch Swagger spec")?
-        .json()
-        .await
-        .context("Failed to parse Swagger spec JSON")?;
-
-    // Parse into ApiSpec
-    let api_spec = parse_swagger(list_id, &spec_json)?;
-
-    // Cache to disk
-    let cache_path = paths::spec_cache_file(list_id)?;
-    let serialized = serde_json::to_string_pretty(&api_spec)?;
-    std::fs::write(&cache_path, serialized)?;
-
-    Ok(api_spec)
-}
-
-/// Load a cached spec from disk, if it exists.
-pub fn load_cached_spec(list_id: &str) -> Result<Option<ApiSpec>> {
-    let cache_path = paths::spec_cache_file(list_id)?;
-    if cache_path.exists() {
-        let content = std::fs::read_to_string(&cache_path)?;
-        let spec: ApiSpec = serde_json::from_str(&content)?;
-        Ok(Some(spec))
-    } else {
-        Ok(None)
-    }
 }
 
 #[cfg(test)]
@@ -384,6 +335,37 @@ mod tests {
     fn test_extract_swagger_url_no_match() {
         let html = "no swagger url here";
         assert_eq!(extract_swagger_url(html), None);
+    }
+
+    #[test]
+    fn test_extract_swagger_json_inline() {
+        let html = r#"
+            some html content
+            var swaggerJson = `{"swagger":"2.0","info":{"title":"Test"},"host":"api.test.kr","basePath":"/api","schemes":["https"],"paths":{}}`
+            more content
+        "#;
+        let result = extract_swagger_json(html);
+        assert!(result.is_some());
+        let json = result.unwrap();
+        assert_eq!(json["swagger"].as_str(), Some("2.0"));
+        assert_eq!(json["host"].as_str(), Some("api.test.kr"));
+    }
+
+    #[test]
+    fn test_extract_swagger_json_not_found() {
+        let html = "no swagger data here";
+        assert!(extract_swagger_json(html).is_none());
+    }
+
+    #[test]
+    fn test_extract_swagger_json_preferred_over_url() {
+        let html = r#"
+            var swaggerUrl = 'https://example.com/spec';
+            var swaggerJson = `{"swagger":"2.0","info":{"title":"Inline"},"host":"inline.kr","basePath":"/","schemes":["https"],"paths":{}}`
+        "#;
+        let result = extract_swagger_json(html);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["host"].as_str(), Some("inline.kr"));
     }
 
     #[test]

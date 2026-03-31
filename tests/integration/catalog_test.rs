@@ -64,54 +64,43 @@ fn test_parse_meta_api_response() {
 }
 
 #[test]
-fn test_search_catalog() {
-    let catalog = korea_cli::core::types::Catalog {
-        services: vec![
-            korea_cli::core::types::ApiService {
-                list_id: "15081808".into(),
-                title: "국세청_사업자등록정보 서비스".into(),
-                description: "사업자 등록 정보 조회".into(),
-                keywords: vec!["사업자".into(), "국세청".into()],
-                org_name: "국세청".into(),
-                category: "공공행정".into(),
-                endpoint_url: "https://api.odcloud.kr".into(),
-                data_format: "JSON".into(),
-                auto_approve: true,
-                is_free: true,
-                request_count: 1234,
-                updated_at: "2024-10-01".into(),
-                operations: vec![],
-            },
-            korea_cli::core::types::ApiService {
-                list_id: "15095478".into(),
-                title: "한국공항공사_공항 소요시간 정보".into(),
-                description: "공항 내 구간별 소요시간".into(),
-                keywords: vec!["공항".into(), "소요시간".into()],
-                org_name: "한국공항공사".into(),
-                category: "교통".into(),
-                endpoint_url: "https://api.odcloud.kr".into(),
-                data_format: "JSON".into(),
-                auto_approve: true,
-                is_free: true,
-                request_count: 500,
-                updated_at: "2024-10-01".into(),
-                operations: vec![],
-            },
-        ],
-        updated_at: "2024-10-01".into(),
-    };
+fn test_search_bundle_catalog() {
+    use korea_cli::core::types::CatalogEntry;
 
-    let results = korea_cli::core::catalog::search_catalog(&catalog, "사업자", None, 10);
+    let catalog = vec![
+        CatalogEntry {
+            list_id: "15081808".into(),
+            title: "국세청_사업자등록정보 서비스".into(),
+            description: "사업자 등록 정보 조회".into(),
+            keywords: vec!["사업자".into(), "국세청".into()],
+            org_name: "국세청".into(),
+            category: "공공행정".into(),
+            request_count: 1234,
+        },
+        CatalogEntry {
+            list_id: "15095478".into(),
+            title: "한국공항공사_공항 소요시간 정보".into(),
+            description: "공항 내 구간별 소요시간".into(),
+            keywords: vec!["공항".into(), "소요시간".into()],
+            org_name: "한국공항공사".into(),
+            category: "교통".into(),
+            request_count: 500,
+        },
+    ];
+
+    let results = korea_cli::core::catalog::search_bundle_catalog(&catalog, "사업자", None, 10);
     assert_eq!(results.total, 1);
     assert_eq!(results.results[0].list_id, "15081808");
 
-    let results = korea_cli::core::catalog::search_catalog(&catalog, "공항", None, 10);
+    let results = korea_cli::core::catalog::search_bundle_catalog(&catalog, "공항", None, 10);
     assert_eq!(results.total, 1);
     assert_eq!(results.results[0].list_id, "15095478");
 
-    let results = korea_cli::core::catalog::search_catalog(&catalog, "공항", Some("교통"), 10);
+    let results =
+        korea_cli::core::catalog::search_bundle_catalog(&catalog, "공항", Some("교통"), 10);
     assert_eq!(results.total, 1);
 
-    let results = korea_cli::core::catalog::search_catalog(&catalog, "공항", Some("공공행정"), 10);
+    let results =
+        korea_cli::core::catalog::search_bundle_catalog(&catalog, "공항", Some("공공행정"), 10);
     assert_eq!(results.total, 0);
 }

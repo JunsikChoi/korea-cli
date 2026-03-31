@@ -49,18 +49,29 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 
 ## Phase 1.1: 안정화 (예정)
 
-### 0. 번들 전환 (스크래핑 → 사전 수집 데이터)
+### 0. 번들 전환 (스크래핑 → 사전 수집 데이터) ✅
 - [x] 번들 데이터 구조 설계 (카탈로그 + spec 통합) → `docs/superpowers/specs/2026-03-31-bundle-transition-design.md`
-- [ ] 번들 로드/조회 로직 구현 (기존 실시간 스크래핑 대체)
-- [ ] `korea-cli update` 번들 다운로드 뼈대
-- [ ] 초기 번들 생성 (수동 1회 수집)
+- [x] 번들 로드/조회 로직 구현 (기존 실시간 스크래핑 대체)
+- [x] `korea-cli update` 번들 다운로드 뼈대
+- [x] 초기 번들 생성 (수동 1회 수집) — 12,080 APIs + 5,363 specs, 2.77 MB
+- [x] Spec 미수집 API 분석 → 유효 spec ~3,960 / skeleton ~1,400 / 미생성 ~1,200 / 외부 ~5,500
 
-### 1. CI 수집 파이프라인
+### 1. Spec 품질 개선
+- [ ] CatalogEntry에 `endpoint_url` 필드 추가 + 번들 빌더 반영
+  - 외부 링크 API: 원본 포탈 URL 안내 가능 (예: lofin365.go.kr)
+  - Swagger 미생성 API: endpoint URL 보존 → 향후 HTML 파싱과 결합
+- [ ] Skeleton spec 필터링 — `operations.is_empty()` spec 제거 또는 `spec_status` 태깅
+- [ ] CatalogEntry에 `spec_status` 필드 추가 (has_spec / skeleton / html_only / external / none)
+- [ ] HTML 테이블 파싱 PoC — `apis.data.go.kr` endpoint 있지만 Swagger 없는 ~1,200개 대상
+  - 대상: 기상청 단기예보 (53,803건), 에어코리아 (51,347건) 등 인기 API
+  - openapi.do 페이지의 오퍼레이션 테이블에서 파라미터/응답 추출
+
+### 2. CI 수집 파이프라인
 - [ ] GitHub Actions 크론으로 data.go.kr 전체 Swagger spec 수집
 - [ ] 변경 감지 + 새 번들 생성 → GitHub Releases 배포
 - [ ] `korea-cli update`가 Releases에서 최신 번들 다운로드
 
-### 2. 호출 엔진 개선
+### 3. 호출 엔진 개선
 - [ ] XML 응답 파싱 지원 (현재 JSON만 처리)
 - [ ] 인증 처리 일반화 — `Infuser ` 접두사 하드코딩 제거, Both+Header 경로 버그 수정
 - [ ] 사용자 입력 정규화 — 사업자번호 하이픈 등 포맷 자동 변환 (spec 기반 힌트)
@@ -68,13 +79,13 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 ---
 
 ## Phase 2 (예정)
-- apis.data.go.kr 호스팅 API 지원 (DataGoKrRest 프로토콜)
+- apis.data.go.kr Swagger 미생성 API 지원 (HTML 테이블 파싱 → spec 추출)
 - XML 응답 처리
 - 페이지네이션 자동화 (numOfRows/pageNo)
 
 ## Phase 3 (예정)
-- 외부 기관 호스팅 API 지원 (ExternalRest)
-- SOAP API 지원
+- 외부 기관 호스팅 API 지원 (ExternalRest) — 서울열린데이터, vworld 등
+- SOAP/WMS/WFS 프로토콜 지원
 - CI 카탈로그 자동 수집 + GitHub Releases 배포
 - koreacli.com 랜딩 페이지
 - 크로스 플랫폼 바이너리 빌드 (macOS/Linux/Windows)

@@ -1,29 +1,54 @@
-use crate::config::AppConfig;
-use crate::core::catalog;
-use crate::core::types::Catalog;
-use anyhow::Result;
+use anyhow::{Context, Result};
+
+/// GitHub repository for bundle downloads.
+const BUNDLE_DOWNLOAD_URL: &str =
+    "https://github.com/JunsikChoi/korea-cli/releases/latest/download/bundle.zstd";
 
 pub async fn run() -> Result<()> {
-    let cfg = AppConfig::load()?;
-    let api_key = cfg.resolve_api_key().ok_or_else(|| {
-        anyhow::anyhow!("API 키가 설정되지 않았습니다. korea-cli config set api-key YOUR_KEY")
-    })?;
+    eprintln!("최신 번들 다운로드 중...");
 
-    eprintln!("메타 API에서 카탈로그 수집 중...");
-    let services = catalog::fetch_all_services(&api_key).await?;
-    let count = services.len();
+    let client = reqwest::Client::builder()
+        .user_agent("korea-cli/0.1.0")
+        .build()?;
 
-    let catalog_data = Catalog {
-        services,
-        updated_at: chrono::Utc::now().format("%Y-%m-%d").to_string(),
-    };
-    catalog::save_catalog(&catalog_data)?;
+    let response = client
+        .get(BUNDLE_DOWNLOAD_URL)
+        .send()
+        .await
+        .context("GitHub Releases 연결 실패")?;
 
-    let response = serde_json::json!({
+    if !response.status().is_success() {
+        anyhow::bail!(
+            "번들 다운로드 실패: HTTP {}. 릴리스가 존재하는지 확인하세요.",
+            response.status()
+        );
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .context("번들 데이터 수신 실패")?;
+
+    // Verify the downloaded bundle is valid
+    let bundle = crate::core::bundle::decompress_and_deserialize(&bytes)
+        .context("다운로드된 번들이 유효하지 않습니다")?;
+
+    // Save to local override path
+    let path = crate::config::paths::bundle_override_file()?;
+    std::fs::write(&path, &bytes)?;
+
+    let output = serde_json::json!({
         "success": true,
-        "services_count": count,
-        "updated_at": catalog_data.updated_at,
+        "version": bundle.metadata.version,
+        "api_count": bundle.metadata.api_count,
+        "spec_count": bundle.metadata.spec_count,
+        "size_bytes": bytes.len(),
+        "saved_to": path.display().to_string(),
+        "message": format!(
+            "번들 업데이트 완료: v{} ({} APIs, {} specs)",
+            bundle.metadata.version, bundle.metadata.api_count, bundle.metadata.spec_count
+        ),
     });
-    println!("{}", serde_json::to_string_pretty(&response)?);
+    println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }

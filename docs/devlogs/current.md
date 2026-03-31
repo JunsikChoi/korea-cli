@@ -39,6 +39,83 @@
 - **Swagger spec body fields 빈 경우 있음**: 일부 API의 Swagger가 body parameter에 schema properties를 포함하지 않음. MVP에서는 허용
 
 ### 다음 작업
-- Claude Desktop / Cursor MCP 연동 테스트
-- 번들 카탈로그 경량화 방안 설계
+- ~~Claude Desktop / Cursor MCP 연동 테스트~~
+- ~~번들 카탈로그 경량화 방안 설계~~
 - Phase 2: apis.data.go.kr 호스팅 API 지원 (DataGoKrRest 프로토콜)
+
+---
+
+## 2026-03-31: Codex 실사용 테스트 — 문제점 발견
+
+### 핵심 발견
+Codex가 실제 API를 search → spec → call 흐름으로 사용하면서 다수 문제 확인.
+**한 줄 요약: 카탈로그 검색기로는 쓸 만하지만, 범용 API 실행기로는 스펙 추출과 호출 추상화가 부족.**
+
+### 문제 목록
+
+1. **Swagger URL 스크래핑 실패 (BLOCKER)**
+   - `swagger.rs:301`이 `var swaggerUrl = '...'` 패턴만 찾음
+   - 에어코리아 등 다수 API에서 swaggerUrl이 빈 문자열 → `spec` 명령 실패
+   - `spec 15073861`, `spec 15073877` 모두 `Could not find swaggerUrl` 에러
+   - **결정: 사용자 측 실시간 스크래핑을 폐기하고, CI 사전 수집 + 번들 배포로 전환**
+
+2. **호출 엔진이 JSON 전용 (Phase 1.1)**
+   - `caller.rs:45~59`: POST는 무조건 JSON body, 응답도 무조건 JSON 파싱
+   - XML 응답, form-urlencoded 등 공공 API 다수가 깨질 가능성
+
+3. **인증 처리 일반화 부족 (Phase 1.1)**
+   - `caller.rs:99`: AuthMethod::Both + Header 선호 시 실제 헤더 미부착 (버그)
+   - `swagger.rs:132`: Both/Header 접두사가 `Infuser ` 하드코딩 — 일반 규칙 아님
+
+4. **사용자 입력 정규화 없음 (Phase 1.1)**
+   - 사업자번호 `220-81-62517` → "등록되지 않은 번호", `2208162517` → 정상
+   - spec 기반 포맷 힌트/자동 변환 필요
+
+### 결정
+- 문제 1 → **번들 전환 설계** (이번 세션)
+- 문제 2, 3, 4 → **Phase 1.1 로드맵에 추가** (호출 엔진 안정화)
+
+### 다음 작업
+- ~~번들 전환 설계 완료~~ ✓
+- ~~구현 계획 수립~~ ✓
+
+---
+
+## 2026-03-31: Swagger spec 수집 가능성 재검증
+
+### 핵심 발견
+기존 코드(`swagger.rs:302`)가 `var swaggerUrl = '...'` 패턴만 찾고 있었으나,
+**대부분의 API(~99%)는 `var swaggerJson = \`{...}\``로 인라인 Swagger JSON을 제공**한다.
+
+- 200개 랜덤 샘플: swaggerUrl 있음 = **0개** (0%)
+- 50개 랜덤 샘플: swaggerJson 인라인 있음 = **50개** (100%)
+- 인기 상위 10개 중 swaggerUrl 있음 = 1개 (사업자등록 API만)
+
+### 두 가지 패턴
+1. `var swaggerJson = \`{...}\`` — 페이지 내 인라인 JSON (**대다수**)
+2. `var swaggerUrl = 'https://infuser.odcloud.kr/...'` — 외부 URL 참조 (**극소수**)
+
+### 결론
+- 12,080개 API 거의 전체의 Swagger spec을 수집 가능
+- CI 수집 파이프라인에서 두 패턴 모두 처리하면 번들에 전체 spec 포함 가능
+- 기존 `extract_swagger_url()` → `swaggerUrl` + `swaggerJson` 두 패턴 모두 처리하도록 변경 필요
+
+---
+
+## 2026-03-31: 번들 전환 설계 + 구현 계획 완료
+
+### 완료
+- 번들 전환 설계 스펙 작성: `docs/superpowers/specs/2026-03-31-bundle-transition-design.md`
+- 구현 플랜 작성 (11 Task, TDD 기반): `docs/plans/2026-03-31-bundle-transition.md`
+- docs 경로 통일: spec → `docs/superpowers/specs/`, plan → `docs/plans/`
+
+### 핵심 결정
+- **직렬화**: postcard (serde 호환, JSON 대비 40-60% 작음)
+- **압축**: zstd level 3 (gzip 대비 10x 빠른 해제)
+- **임베딩**: `include_bytes!` + build.rs (placeholder 자동 생성)
+- **글로벌 접근**: `once_cell::Lazy<Bundle>` (첫 접근 시 1회 해제)
+- **오버라이드 체인**: 로컬 bundle.zstd > 내장 번들
+- **번들 크기 추정**: ~2-3 MB (raw 18MB → postcard 11MB → zstd 압축)
+
+### 다음 작업
+- 번들 전환 구현 (플랜 Task 1~11)

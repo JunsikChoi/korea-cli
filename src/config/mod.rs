@@ -33,7 +33,9 @@ impl AppConfig {
 
     /// Resolve API key: env var takes priority over config.toml.
     pub fn resolve_api_key(&self) -> Option<String> {
-        std::env::var(ENV_API_KEY).ok().or_else(|| self.api_key.clone())
+        std::env::var(ENV_API_KEY)
+            .ok()
+            .or_else(|| self.api_key.clone())
     }
 
     pub fn set(&mut self, key: &str, value: &str) -> Result<()> {
@@ -46,10 +48,9 @@ impl AppConfig {
 
     pub fn get(&self, key: &str) -> Result<String> {
         match key {
-            "api-key" => {
-                self.resolve_api_key()
-                    .ok_or_else(|| anyhow::anyhow!("api-key not set"))
-            }
+            "api-key" => self
+                .resolve_api_key()
+                .ok_or_else(|| anyhow::anyhow!("api-key not set")),
             _ => anyhow::bail!("Unknown config key: {key}"),
         }
     }

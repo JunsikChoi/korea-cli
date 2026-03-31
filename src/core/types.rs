@@ -58,8 +58,13 @@ pub struct ApiSpec {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AuthMethod {
-    QueryParam { name: String },
-    Header { name: String, prefix: String },
+    QueryParam {
+        name: String,
+    },
+    Header {
+        name: String,
+        prefix: String,
+    },
     Both {
         query: String,
         header_name: String,

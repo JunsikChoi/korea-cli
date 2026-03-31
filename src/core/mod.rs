@@ -1,4 +1,4 @@
-pub mod types;
+pub mod caller;
 pub mod catalog;
 pub mod swagger;
-pub mod caller;
+pub mod types;

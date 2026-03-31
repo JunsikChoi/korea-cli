@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
 
-mod core;
-mod config;
-mod mcp;
 mod cli;
+mod config;
+mod core;
+mod mcp;
 
 #[derive(Parser)]
 #[command(name = "korea-cli")]
@@ -62,7 +62,9 @@ enum ConfigAction {
 }
 
 fn parse_param(s: &str) -> Result<(String, String), String> {
-    let pos = s.find('=').ok_or_else(|| format!("invalid param: {s} (expected key=value)"))?;
+    let pos = s
+        .find('=')
+        .ok_or_else(|| format!("invalid param: {s} (expected key=value)"))?;
     Ok((s[..pos].to_string(), s[pos + 1..].to_string()))
 }
 
@@ -74,13 +76,21 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Search { query, category, limit }) => {
+        Some(Commands::Search {
+            query,
+            category,
+            limit,
+        }) => {
             cli::search::run(&query, category.as_deref(), limit).await?;
         }
         Some(Commands::Spec { list_id }) => {
             cli::spec::run(&list_id).await?;
         }
-        Some(Commands::Call { list_id, operation, params }) => {
+        Some(Commands::Call {
+            list_id,
+            operation,
+            params,
+        }) => {
             cli::call::run(&list_id, &operation, &params).await?;
         }
         Some(Commands::Mcp) => {
@@ -97,7 +107,8 @@ async fn main() -> anyhow::Result<()> {
                 let cfg = config::AppConfig::load()?;
                 match cfg.get(&key) {
                     Ok(value) => {
-                        let response = serde_json::json!({ "success": true, "key": key, "value": value });
+                        let response =
+                            serde_json::json!({ "success": true, "key": key, "value": value });
                         println!("{}", serde_json::to_string_pretty(&response)?);
                     }
                     Err(e) => {

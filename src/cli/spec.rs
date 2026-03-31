@@ -1,8 +1,12 @@
-use crate::core::swagger;
+use crate::core::bundle::BUNDLE;
 use anyhow::Result;
 
 pub async fn run(list_id: &str) -> Result<()> {
-    let spec = swagger::fetch_and_cache_spec(list_id).await?;
+    let spec = BUNDLE
+        .specs
+        .get(list_id)
+        .ok_or_else(|| anyhow::anyhow!("API spec을 찾을 수 없습니다: {list_id}"))?;
+
     let output = serde_json::json!({
         "success": true,
         "list_id": spec.list_id,

@@ -1,12 +1,11 @@
 //! MCP tool handlers — search_api, get_api_spec, call_api.
 
 use crate::config::AppConfig;
-use crate::core::{caller, catalog, swagger};
+use crate::core::{bundle::BUNDLE, caller, catalog};
 use serde_json::json;
 
 pub async fn handle_tool_call(params: serde_json::Value) -> serde_json::Value {
     let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-
     let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
     let result = match tool_name {
@@ -35,16 +34,15 @@ async fn handle_search(args: serde_json::Value) -> anyhow::Result<serde_json::Va
     let category = args.get("category").and_then(|v| v.as_str());
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
-    let catalog_data = catalog::load_catalog()?;
-    if catalog_data.services.is_empty() {
+    if BUNDLE.catalog.is_empty() {
         return Ok(json!({
-            "success": false, "error": "CATALOG_EMPTY",
-            "message": "카탈로그가 비어있습니다.",
+            "success": false, "error": "BUNDLE_EMPTY",
+            "message": "번들이 비어있습니다.",
             "action": "korea-cli update 를 먼저 실행하세요."
         }));
     }
 
-    let results = catalog::search_catalog(&catalog_data, query, category, limit);
+    let results = catalog::search_bundle_catalog(&BUNDLE.catalog, query, category, limit);
     Ok(serde_json::to_value(results)?)
 }
 
@@ -54,18 +52,19 @@ async fn handle_get_spec(args: serde_json::Value) -> anyhow::Result<serde_json::
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("missing 'list_id' parameter"))?;
 
-    let spec = swagger::fetch_and_cache_spec(list_id).await?;
-    let has_key = AppConfig::load()?.resolve_api_key().is_some();
+    let spec = BUNDLE
+        .specs
+        .get(list_id)
+        .ok_or_else(|| anyhow::anyhow!("API spec not found: {list_id}"))?;
 
-    let mut output = serde_json::to_value(&spec)?;
+    let has_key = AppConfig::load()?.resolve_api_key().is_some();
+    let mut output = serde_json::to_value(spec)?;
     if let Some(obj) = output.as_object_mut() {
         obj.insert("has_api_key".into(), json!(has_key));
         if !has_key {
             obj.insert(
                 "key_guide".into(),
-                json!(
-                    "이 API를 호출하려면 API 키가 필요합니다. DATA_GO_KR_API_KEY 환경변수를 설정하세요."
-                ),
+                json!("이 API를 호출하려면 API 키가 필요합니다. DATA_GO_KR_API_KEY 환경변수를 설정하세요."),
             );
         }
     }
@@ -95,7 +94,10 @@ async fn handle_call(args: serde_json::Value) -> anyhow::Result<serde_json::Valu
         }
     };
 
-    let spec = swagger::fetch_and_cache_spec(list_id).await?;
+    let spec = BUNDLE
+        .specs
+        .get(list_id)
+        .ok_or_else(|| anyhow::anyhow!("API spec not found: {list_id}"))?;
 
     let params: Vec<(String, String)> = args
         .get("params")
@@ -113,6 +115,6 @@ async fn handle_call(args: serde_json::Value) -> anyhow::Result<serde_json::Valu
         })
         .unwrap_or_default();
 
-    let result = caller::call_api(&spec, operation, &params, &api_key).await?;
+    let result = caller::call_api(spec, operation, &params, &api_key).await?;
     Ok(serde_json::to_value(result)?)
 }

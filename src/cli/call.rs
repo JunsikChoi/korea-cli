@@ -1,5 +1,5 @@
 use crate::config::AppConfig;
-use crate::core::{caller, swagger};
+use crate::core::{bundle::BUNDLE, caller};
 use anyhow::Result;
 
 pub async fn run(list_id: &str, operation: &str, params: &[(String, String)]) -> Result<()> {
@@ -18,8 +18,12 @@ pub async fn run(list_id: &str, operation: &str, params: &[(String, String)]) ->
         }
     };
 
-    let spec = swagger::fetch_and_cache_spec(list_id).await?;
-    let result = caller::call_api(&spec, operation, params, &api_key).await?;
+    let spec = BUNDLE
+        .specs
+        .get(list_id)
+        .ok_or_else(|| anyhow::anyhow!("API spec을 찾을 수 없습니다: {list_id}"))?;
+
+    let result = caller::call_api(spec, operation, params, &api_key).await?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }

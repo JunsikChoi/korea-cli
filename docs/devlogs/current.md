@@ -144,6 +144,64 @@ Codex가 실제 API를 search → spec → call 흐름으로 사용하면서 다
 - spec 수집률 44.4% (REST API가 아닌 데이터셋도 포함된 전체 목록 대비)
 
 ### 다음 작업
+- ~~spec 미수집 API 분석~~ ✓
 - CI 수집 파이프라인 (GitHub Actions cron)
-- spec 수집률 개선 (swaggerJson 패턴 외 추가 패턴 탐색)
+- spec 수집률 개선
 - Phase 1.1 호출 엔진 안정화 (XML, 인증 일반화)
+
+---
+
+## 2026-04-01: Swagger spec 미수집 API 심층 분석
+
+### 배경
+번들에 12,080 카탈로그 + 5,363 spec이 수집되었지만, 44.4% 수집률의 실체를 파악할 필요.
+
+### 핵심 발견: 유효 spec은 3,960개 (32.8%)
+
+수집된 5,363 spec 중 **~1,400개가 skeleton placeholder** (`host:""`, `paths:{}`) — 오퍼레이션 0개로 실질 무용.
+
+### data.go.kr 3-tier 호스팅 구조
+
+| Tier | 호스트 | Swagger 상태 | 수량 |
+|------|--------|-------------|------|
+| **1. Infuser** | `api.odcloud.kr` | `swaggerUrl`로 제공 | ~32 |
+| **2. Gateway** | `apis.data.go.kr` | `swaggerJson` 인라인 (선택적) | ~3,960 유효 / ~1,200 미생성 |
+| **3. External** | 각 기관 서버 | 없음 | ~5,500+ |
+
+### 12,080개 전체 분류
+
+| 유형 | 추정 수량 | 비율 | 설명 |
+|------|----------|------|------|
+| **유효 Swagger** | ~3,960 | 32.8% | 작동하는 spec, 번들 포함 |
+| **Skeleton Swagger** | ~1,400 | 11.6% | 빈 host/paths — 제거 필요 |
+| **Gateway API인데 Swagger 미생성** | ~1,200 | 9.9% | `apis.data.go.kr` endpoint 있지만 포탈이 Swagger 안 만듦 |
+| **외부 포탈 링크** | ~2,500 | 20.7% | 서울열린데이터, vworld, tour.go.kr 등 |
+| **카탈로그 전용** | ~2,500 | 20.7% | endpoint URL 없이 문서 링크만 |
+| **WMS/WFS 공간 서비스** | ~89 | 0.7% | OGC 프로토콜, REST 아님 |
+| **기타** | ~430 | 3.6% | undefined host, 기타 비정형 |
+
+### 인기도 역전 현상
+
+가장 인기 있는 API들이 spec이 없는 그룹에 집중:
+- Swagger 있음: 평균 104 요청, 중앙값 20
+- Swagger 없음: **평균 322 요청, 중앙값 68** (3배 더 인기)
+
+상위 미수집: 기상청 단기예보 (53,803), 에어코리아 대기질 (51,347), 환율정보 (37,541), 지하철 실시간 (21,584)
+
+### 개선 전략 (ROI 순)
+
+1. **Skeleton 정리**: 번들에서 `operations.is_empty()` spec 제거 또는 `spec_status` 태깅
+2. **CatalogEntry에 endpoint_url 추가**: 메타 API에 `endpoint_url`이 이미 있지만 번들 빌더가 버리고 있음. 추가하면 외부 링크 API도 원본 URL 안내 가능
+3. **HTML 테이블 파싱** (ROI 최고): `apis.data.go.kr` endpoint가 있는 ~1,200개의 openapi.do 페이지에서 오퍼레이션 테이블 HTML 파싱 → 파라미터/응답 추출
+4. **외부 API 스코프 아웃**: 카탈로그 검색에는 표시하되, spec/call 미지원 → endpoint_url로 외부 포탈 링크 안내
+
+### 결정
+- **CatalogEntry에 endpoint_url 포함하기로 결정** (2026-04-01)
+  - 근거: skeleton/외부 링크 API에서 "이 API는 외부 포탈에서 제공됩니다: {url}" 안내 가능
+  - 번들 크기 영향 미미 (URL 문자열 12K개 추가)
+  - Swagger 미생성 gateway API도 endpoint URL을 알면 향후 HTML 파싱과 결합 가능
+
+### 다음 작업
+- CatalogEntry에 endpoint_url 필드 추가 + 번들 빌더 반영
+- skeleton spec 필터링 로직 추가
+- HTML 테이블 파싱 PoC (기상청 단기예보 대상)

@@ -64,26 +64,46 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 - [x] 번들 스키마 v2 (schema_version) + 구 번들 graceful fallback
 - [x] CLI/MCP spec_status 기반 안내 응답
 
-### 2. CI 수집 파이프라인
-- [ ] GitHub Actions 크론으로 data.go.kr 전체 Swagger spec 수집
+### 2. HTML 폴백으로 스펙 커버리지 확장 (32.6% → 53.5%)
+- [x] html_parser.rs 셀렉터 버그 수정 (`name=` → `id=` 우선)
+- [x] HTML 전수조사 바이너리 (`html-survey`) 구현 + 실행
+- [x] 전수조사 결과 분석: 2,522개 신규 추출 가능 확인
+- [ ] build_bundle.rs에 HTML 폴백 경로 추가 (Swagger 실패 → pk+AJAX → 스펙 생성)
+  - openapi.do에서 pk + select 옵션 추출
+  - 각 operation마다 `selectApiDetailFunction.do` AJAX POST (Referer 필수)
+  - `parse_operation_detail` → `build_api_spec`으로 스펙 구성
+- [ ] html_parser.rs 보강 — td_fallback 우선 + 요청주소 미발견 시 서비스URL 폴백
+- [ ] 번들 리빌드 + 커버리지 검증 (목표: 6,475개 = 53.5%)
+- [ ] AJAX 부분 성공 662건 추가 파싱 (서비스URL 기반)
+
+### 3. CI 수집 파이프라인
+- [ ] GitHub Actions 크론으로 Swagger + HTML AJAX 전체 수집
 - [ ] 변경 감지 + 새 번들 생성 → GitHub Releases 배포
 - [ ] `korea-cli update`가 Releases에서 최신 번들 다운로드
 
-### 3. 호출 엔진 개선
+### 4. 호출 엔진 개선
 - [ ] XML 응답 파싱 지원 (현재 JSON만 처리)
 - [ ] 인증 처리 일반화 — `Infuser ` 접두사 하드코딩 제거, Both+Header 경로 버그 수정
 - [ ] 사용자 입력 정규화 — 사업자번호 하이픈 등 포맷 자동 변환 (spec 기반 힌트)
 
 ---
 
-## Phase 2 (예정)
-- apis.data.go.kr Swagger 미생성 API 지원 (HTML 테이블 파싱 → spec 추출)
+## Phase 2: 호출 안정화 + 배포 (예정)
 - XML 응답 처리
 - 페이지네이션 자동화 (numOfRows/pageNo)
-
-## Phase 3 (예정)
-- 외부 기관 호스팅 API 지원 (ExternalRest) — 서울열린데이터, vworld 등
-- SOAP/WMS/WFS 프로토콜 지원
-- CI 카탈로그 자동 수집 + GitHub Releases 배포
+- Claude Desktop / Cursor MCP 연동 테스트 + 문서화
+- `cargo install korea-cli` + GitHub Releases 바이너리 배포
 - koreacli.com 랜딩 페이지
+
+## Phase 3: 확장 (예정)
+- 외부 기관 호스팅 API 지원 (ExternalRest) — 주요 81개 도메인 중 인기 순 선별
+- SOAP/WMS/WFS 프로토콜 지원
 - 크로스 플랫폼 바이너리 빌드 (macOS/Linux/Windows)
+
+## 커버리지 한계 참고 (2026-04-02 전수조사 기준)
+
+현재 기술적으로 추출 불가능한 API:
+- **operation 미등록 (4,899건)**: pk는 있지만 select 옵션 없음 — 기관이 데이터 입력해야 함
+- **Skeleton (1,405건)**: Swagger 파일 있지만 paths 비어있음 + select 옵션도 없음
+- **폐기/서비스 종료 (282건)**: 비활성 API
+- **접근 불가 (10건)**: JS 리다이렉트 또는 네트워크 에러

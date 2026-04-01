@@ -46,6 +46,10 @@ path = "src/bin/survey.rs"
 name = "html-survey"
 path = "src/bin/html_survey.rs"
 
+[[bin]]
+name = "crawl-pages"
+path = "src/bin/crawl_pages.rs"
+
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"

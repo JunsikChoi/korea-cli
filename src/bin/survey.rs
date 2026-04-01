@@ -221,6 +221,80 @@ fn extract_domain(url: &str) -> String {
         .to_string()
 }
 
+async fn survey_single_api(
+    client: &reqwest::Client,
+    list_id: &str,
+    title: &str,
+    endpoint_url: &str,
+) -> ApiSurveyEntry {
+    let page_url = format!("https://www.data.go.kr/data/{list_id}/openapi.do");
+
+    let (http_status, fetch_error, analysis) = match client.get(&page_url).send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            match resp.text().await {
+                Ok(html) => (Some(status), None, Some(analyze_page(&html))),
+                Err(e) => (Some(status), Some(format!("body read error: {e}")), None),
+            }
+        }
+        Err(e) => (None, Some(format!("request error: {e}")), None),
+    };
+
+    let endpoint_domain = extract_domain(endpoint_url);
+
+    let has_spec = analysis
+        .as_ref()
+        .map(|a| a.swagger_ops_count.unwrap_or(0) > 0)
+        .unwrap_or(false);
+    let is_skeleton = analysis
+        .as_ref()
+        .map(|a| a.has_swagger_json && a.swagger_ops_count == Some(0))
+        .unwrap_or(false);
+    let current_classification = format!(
+        "{:?}",
+        korea_cli::core::types::SpecStatus::classify(has_spec, is_skeleton, endpoint_url)
+    );
+
+    match analysis {
+        Some(a) => ApiSurveyEntry {
+            list_id: list_id.to_string(),
+            title: title.to_string(),
+            endpoint_url: endpoint_url.to_string(),
+            http_status,
+            fetch_error,
+            has_swagger_json: a.has_swagger_json,
+            has_swagger_url: a.has_swagger_url,
+            swagger_url_value: a.swagger_url_value,
+            swagger_ops_count: a.swagger_ops_count,
+            swagger_error: a.swagger_error,
+            has_html_pk: a.has_html_pk,
+            html_pk_value: a.html_pk_value,
+            html_ops_count: a.html_ops_count,
+            endpoint_domain,
+            current_classification,
+            anomalies: a.anomalies,
+        },
+        None => ApiSurveyEntry {
+            list_id: list_id.to_string(),
+            title: title.to_string(),
+            endpoint_url: endpoint_url.to_string(),
+            http_status,
+            fetch_error,
+            has_swagger_json: false,
+            has_swagger_url: false,
+            swagger_url_value: None,
+            swagger_ops_count: None,
+            swagger_error: None,
+            has_html_pk: false,
+            html_pk_value: None,
+            html_ops_count: 0,
+            endpoint_domain,
+            current_classification,
+            anomalies: vec!["page_fetch_failed".into()],
+        },
+    }
+}
+
 fn main() {
     // TODO: Task 5에서 구현
 }

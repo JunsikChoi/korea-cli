@@ -39,28 +39,58 @@ async fn main() -> Result<()> {
         "\n=== Step 2/4: Swagger spec 수집 (동시 {}건) ===",
         config.concurrency
     );
-    let specs = collect_specs(&services, &config).await;
+    let all_specs = collect_specs(&services, &config).await;
+
+    // Separate available specs (with operations) from skeletons (empty operations)
+    let mut specs: HashMap<String, ApiSpec> = HashMap::new();
+    let mut skeleton_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (id, spec) in all_specs {
+        if spec.operations.is_empty() {
+            skeleton_ids.insert(id);
+        } else {
+            specs.insert(id, spec);
+        }
+    }
     eprintln!(
-        "  {}/{} spec 수집 완료 ({:.1}%)",
+        "  {}/{} spec 수집 완료 ({:.1}%), skeleton {} 제외",
         specs.len(),
         services.len(),
-        (specs.len() as f64 / services.len() as f64) * 100.0
+        (specs.len() as f64 / services.len() as f64) * 100.0,
+        skeleton_ids.len(),
     );
 
-    // Step 3: Build lightweight catalog
+    // Step 3: Build lightweight catalog with spec_status classification
     eprintln!("\n=== Step 3/4: 번들 구성 ===");
     let catalog: Vec<CatalogEntry> = services
         .iter()
-        .map(|svc| CatalogEntry {
-            list_id: svc.list_id.clone(),
-            title: svc.title.clone(),
-            description: svc.description.clone(),
-            keywords: svc.keywords.clone(),
-            org_name: svc.org_name.clone(),
-            category: svc.category.clone(),
-            request_count: svc.request_count,
+        .map(|svc| {
+            let spec_status = SpecStatus::classify(
+                specs.contains_key(&svc.list_id),
+                skeleton_ids.contains(&svc.list_id),
+                &svc.endpoint_url,
+            );
+            CatalogEntry {
+                list_id: svc.list_id.clone(),
+                title: svc.title.clone(),
+                description: svc.description.clone(),
+                keywords: svc.keywords.clone(),
+                org_name: svc.org_name.clone(),
+                category: svc.category.clone(),
+                request_count: svc.request_count,
+                endpoint_url: svc.endpoint_url.clone(),
+                spec_status,
+            }
         })
         .collect();
+
+    // Log spec_status distribution
+    let mut status_counts: HashMap<String, usize> = HashMap::new();
+    for entry in &catalog {
+        *status_counts
+            .entry(format!("{:?}", entry.spec_status))
+            .or_default() += 1;
+    }
+    eprintln!("  spec_status 분포: {:?}", status_counts);
 
     let checksum = format!(
         "{:x}",
@@ -69,6 +99,7 @@ async fn main() -> Result<()> {
     let bundle_data = Bundle {
         metadata: BundleMetadata {
             version: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+            schema_version: CURRENT_SCHEMA_VERSION,
             api_count: catalog.len(),
             spec_count: specs.len(),
             checksum,

@@ -205,6 +205,8 @@ pub fn search_bundle_catalog(
             org: entry.org_name.clone(),
             category: entry.category.clone(),
             popularity: entry.request_count,
+            spec_status: entry.spec_status,
+            endpoint_url: entry.endpoint_url.clone(),
         })
         .collect();
 
@@ -226,6 +228,8 @@ mod tests {
                 org_name: "기상청".into(),
                 category: "과학기술".into(),
                 request_count: 500,
+                endpoint_url: "https://apis.data.go.kr/weather".into(),
+                spec_status: SpecStatus::Available,
             },
             CatalogEntry {
                 list_id: "222".into(),
@@ -235,6 +239,8 @@ mod tests {
                 org_name: "국세청".into(),
                 category: "산업경제".into(),
                 request_count: 1000,
+                endpoint_url: "https://api.odcloud.kr/nts".into(),
+                spec_status: SpecStatus::Available,
             },
         ];
 
@@ -242,6 +248,11 @@ mod tests {
         assert_eq!(result.total, 1);
         assert_eq!(result.results[0].list_id, "111");
         assert_eq!(result.results[0].category, "과학기술");
+        assert_eq!(result.results[0].spec_status, SpecStatus::Available);
+        assert_eq!(
+            result.results[0].endpoint_url,
+            "https://apis.data.go.kr/weather"
+        );
     }
 
     #[test]
@@ -255,6 +266,8 @@ mod tests {
                 org_name: "기상청".into(),
                 category: "과학기술".into(),
                 request_count: 100,
+                endpoint_url: "".into(),
+                spec_status: SpecStatus::CatalogOnly,
             },
             CatalogEntry {
                 list_id: "222".into(),
@@ -264,6 +277,8 @@ mod tests {
                 org_name: "환경부".into(),
                 category: "산업경제".into(),
                 request_count: 200,
+                endpoint_url: "".into(),
+                spec_status: SpecStatus::CatalogOnly,
             },
         ];
 
@@ -283,6 +298,8 @@ mod tests {
                 org_name: "국세청".into(),
                 category: "".into(),
                 request_count: 100,
+                endpoint_url: "".into(),
+                spec_status: SpecStatus::Available,
             },
             CatalogEntry {
                 list_id: "222".into(),
@@ -292,6 +309,8 @@ mod tests {
                 org_name: "국세청".into(),
                 category: "".into(),
                 request_count: 50,
+                endpoint_url: "".into(),
+                spec_status: SpecStatus::Skeleton,
             },
         ];
 

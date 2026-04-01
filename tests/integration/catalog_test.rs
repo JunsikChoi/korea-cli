@@ -65,7 +65,7 @@ fn test_parse_meta_api_response() {
 
 #[test]
 fn test_search_bundle_catalog() {
-    use korea_cli::core::types::CatalogEntry;
+    use korea_cli::core::types::{CatalogEntry, SpecStatus};
 
     let catalog = vec![
         CatalogEntry {
@@ -76,6 +76,8 @@ fn test_search_bundle_catalog() {
             org_name: "국세청".into(),
             category: "공공행정".into(),
             request_count: 1234,
+            endpoint_url: "https://api.odcloud.kr/api/nts-businessman/v1".into(),
+            spec_status: SpecStatus::Available,
         },
         CatalogEntry {
             list_id: "15095478".into(),
@@ -85,6 +87,8 @@ fn test_search_bundle_catalog() {
             org_name: "한국공항공사".into(),
             category: "교통".into(),
             request_count: 500,
+            endpoint_url: "https://apis.data.go.kr/airport".into(),
+            spec_status: SpecStatus::HtmlOnly,
         },
     ];
 

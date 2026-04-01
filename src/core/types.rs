@@ -38,6 +38,10 @@ pub struct OperationSummary {
 
 // ── Bundle types (pre-collected data for offline use) ──
 
+/// Current bundle schema version. Increment when Bundle/CatalogEntry fields change.
+/// New variant in SpecStatus must be appended at the end (postcard varint ordering).
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bundle {
     pub metadata: BundleMetadata,
@@ -48,9 +52,67 @@ pub struct Bundle {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleMetadata {
     pub version: String,
+    pub schema_version: u32,
     pub api_count: usize,
     pub spec_count: usize,
     pub checksum: String,
+}
+
+/// Spec availability status for a catalog entry.
+/// WARNING: New variants must be appended at the end — postcard uses variant index ordering.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum SpecStatus {
+    Available,
+    Skeleton,
+    HtmlOnly,
+    External,
+    CatalogOnly,
+    Unsupported,
+}
+
+impl SpecStatus {
+    pub fn is_callable(&self) -> bool {
+        matches!(self, Self::Available)
+    }
+
+    pub fn user_message(&self) -> &'static str {
+        match self {
+            Self::Available => "API spec 사용 가능",
+            Self::Skeleton => "Swagger spec이 비어있습니다. 외부 서비스 페이지에서 확인하세요.",
+            Self::HtmlOnly => "spec 파싱 준비 중입니다. endpoint URL을 참고하세요.",
+            Self::External => "외부 포탈에서 제공하는 API입니다.",
+            Self::CatalogOnly => "카탈로그 정보만 있습니다.",
+            Self::Unsupported => "REST가 아닌 프로토콜(WMS/WFS 등)입니다.",
+        }
+    }
+
+    /// Classify spec status based on available data.
+    pub fn classify(has_spec: bool, is_skeleton: bool, endpoint_url: &str) -> Self {
+        if has_spec {
+            return Self::Available;
+        }
+        if is_skeleton {
+            return Self::Skeleton;
+        }
+        let url_lower = endpoint_url.to_lowercase();
+        if url_lower.contains("wms") || url_lower.contains("wfs") || url_lower.contains("wcs") {
+            return Self::Unsupported;
+        }
+        if endpoint_url.contains("apis.data.go.kr") {
+            return Self::HtmlOnly;
+        }
+        if !endpoint_url.is_empty()
+            && !endpoint_url.contains("data.go.kr")
+            && !endpoint_url.contains("api.odcloud.kr")
+        {
+            return Self::External;
+        }
+        if endpoint_url.is_empty() {
+            return Self::CatalogOnly;
+        }
+        // Has a data.go.kr/odcloud URL but no spec
+        Self::HtmlOnly
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +124,8 @@ pub struct CatalogEntry {
     pub org_name: String,
     pub category: String,
     pub request_count: u32,
+    pub endpoint_url: String,
+    pub spec_status: SpecStatus,
 }
 
 // ── API Spec types (detailed, from Swagger) ──
@@ -227,15 +291,16 @@ pub struct SearchEntry {
     pub org: String,
     pub category: String,
     pub popularity: u32,
+    pub spec_status: SpecStatus,
+    pub endpoint_url: String,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_bundle_postcard_roundtrip() {
-        let entry = CatalogEntry {
+    fn make_test_entry() -> CatalogEntry {
+        CatalogEntry {
             list_id: "12345".into(),
             title: "Test API".into(),
             description: "desc".into(),
@@ -243,33 +308,80 @@ mod tests {
             org_name: "org".into(),
             category: "cat".into(),
             request_count: 100,
-        };
+            endpoint_url: "https://apis.data.go.kr/test".into(),
+            spec_status: SpecStatus::Available,
+        }
+    }
+
+    fn make_test_metadata() -> BundleMetadata {
+        BundleMetadata {
+            version: "2026-04-01".into(),
+            schema_version: CURRENT_SCHEMA_VERSION,
+            api_count: 1,
+            spec_count: 0,
+            checksum: "abc".into(),
+        }
+    }
+
+    #[test]
+    fn test_spec_status_is_callable() {
+        assert!(SpecStatus::Available.is_callable());
+        assert!(!SpecStatus::Skeleton.is_callable());
+        assert!(!SpecStatus::HtmlOnly.is_callable());
+        assert!(!SpecStatus::External.is_callable());
+        assert!(!SpecStatus::CatalogOnly.is_callable());
+        assert!(!SpecStatus::Unsupported.is_callable());
+    }
+
+    #[test]
+    fn test_spec_status_user_message() {
+        assert!(!SpecStatus::Available.user_message().is_empty());
+        assert!(SpecStatus::Skeleton.user_message().contains("비어있습니다"));
+        assert!(SpecStatus::External.user_message().contains("외부"));
+        assert!(SpecStatus::Unsupported.user_message().contains("WMS"));
+    }
+
+    #[test]
+    fn test_spec_status_postcard_roundtrip() {
+        let statuses = [
+            SpecStatus::Available,
+            SpecStatus::Skeleton,
+            SpecStatus::HtmlOnly,
+            SpecStatus::External,
+            SpecStatus::CatalogOnly,
+            SpecStatus::Unsupported,
+        ];
+        for status in &statuses {
+            let bytes = postcard::to_allocvec(status).unwrap();
+            let decoded: SpecStatus = postcard::from_bytes(&bytes).unwrap();
+            assert_eq!(&decoded, status);
+        }
+    }
+
+    #[test]
+    fn test_bundle_postcard_roundtrip() {
         let bundle = Bundle {
-            metadata: BundleMetadata {
-                version: "2026-03-31".into(),
-                api_count: 1,
-                spec_count: 0,
-                checksum: "abc".into(),
-            },
-            catalog: vec![entry],
+            metadata: make_test_metadata(),
+            catalog: vec![make_test_entry()],
             specs: HashMap::new(),
         };
         let bytes = postcard::to_allocvec(&bundle).unwrap();
         let decoded: Bundle = postcard::from_bytes(&bytes).unwrap();
         assert_eq!(decoded.catalog.len(), 1);
         assert_eq!(decoded.catalog[0].title, "Test API");
-        assert_eq!(decoded.metadata.version, "2026-03-31");
+        assert_eq!(
+            decoded.catalog[0].endpoint_url,
+            "https://apis.data.go.kr/test"
+        );
+        assert_eq!(decoded.catalog[0].spec_status, SpecStatus::Available);
+        assert_eq!(decoded.metadata.version, "2026-04-01");
+        assert_eq!(decoded.metadata.schema_version, CURRENT_SCHEMA_VERSION);
     }
 
     #[test]
     fn test_bundle_zstd_roundtrip() {
         let bundle = Bundle {
-            metadata: BundleMetadata {
-                version: "test".into(),
-                api_count: 0,
-                spec_count: 0,
-                checksum: "".into(),
-            },
+            metadata: make_test_metadata(),
             catalog: vec![],
             specs: HashMap::new(),
         };
@@ -277,6 +389,107 @@ mod tests {
         let compressed = zstd::encode_all(bytes.as_slice(), 3).unwrap();
         let decompressed = zstd::decode_all(compressed.as_slice()).unwrap();
         let decoded: Bundle = postcard::from_bytes(&decompressed).unwrap();
-        assert_eq!(decoded.metadata.version, "test");
+        assert_eq!(decoded.metadata.version, "2026-04-01");
+        assert_eq!(decoded.metadata.schema_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_old_schema_bundle_fails_deserialization() {
+        // Simulate v1 bundle (no schema_version, no endpoint_url/spec_status)
+        // by serializing a different struct layout
+        #[derive(Serialize)]
+        struct OldMetadata {
+            version: String,
+            api_count: usize,
+            spec_count: usize,
+            checksum: String,
+        }
+        #[derive(Serialize)]
+        struct OldEntry {
+            list_id: String,
+            title: String,
+            description: String,
+            keywords: Vec<String>,
+            org_name: String,
+            category: String,
+            request_count: u32,
+        }
+        #[derive(Serialize)]
+        struct OldBundle {
+            metadata: OldMetadata,
+            catalog: Vec<OldEntry>,
+            specs: HashMap<String, ApiSpec>,
+        }
+
+        let old = OldBundle {
+            metadata: OldMetadata {
+                version: "old".into(),
+                api_count: 0,
+                spec_count: 0,
+                checksum: "".into(),
+            },
+            catalog: vec![],
+            specs: HashMap::new(),
+        };
+        let bytes = postcard::to_allocvec(&old).unwrap();
+        // Deserializing as new Bundle should fail (schema mismatch)
+        let result = postcard::from_bytes::<Bundle>(&bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_classify_available() {
+        assert_eq!(
+            SpecStatus::classify(true, false, "https://apis.data.go.kr/x"),
+            SpecStatus::Available,
+        );
+    }
+
+    #[test]
+    fn test_classify_skeleton() {
+        assert_eq!(
+            SpecStatus::classify(false, true, "https://apihub.kma.go.kr/x"),
+            SpecStatus::Skeleton,
+        );
+    }
+
+    #[test]
+    fn test_classify_unsupported_wms() {
+        assert_eq!(
+            SpecStatus::classify(false, false, "https://example.kr/wms/service"),
+            SpecStatus::Unsupported,
+        );
+    }
+
+    #[test]
+    fn test_classify_html_only() {
+        assert_eq!(
+            SpecStatus::classify(false, false, "https://apis.data.go.kr/1360000/Weather"),
+            SpecStatus::HtmlOnly,
+        );
+    }
+
+    #[test]
+    fn test_classify_external() {
+        assert_eq!(
+            SpecStatus::classify(false, false, "https://apihub.kma.go.kr/api/typ01"),
+            SpecStatus::External,
+        );
+    }
+
+    #[test]
+    fn test_classify_catalog_only() {
+        assert_eq!(
+            SpecStatus::classify(false, false, ""),
+            SpecStatus::CatalogOnly,
+        );
+    }
+
+    #[test]
+    fn test_classify_odcloud_no_spec() {
+        assert_eq!(
+            SpecStatus::classify(false, false, "https://api.odcloud.kr/api/test"),
+            SpecStatus::HtmlOnly,
+        );
     }
 }

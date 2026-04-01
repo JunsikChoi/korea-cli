@@ -17,6 +17,7 @@ struct PlaceholderBundle {
 #[derive(Serialize)]
 struct PlaceholderMetadata {
     version: String,
+    schema_version: u32,
     api_count: usize,
     spec_count: usize,
     checksum: String,
@@ -36,6 +37,7 @@ fn main() {
         let bundle = PlaceholderBundle {
             metadata: PlaceholderMetadata {
                 version: "placeholder".into(),
+                schema_version: 2,
                 api_count: 0,
                 spec_count: 0,
                 checksum: "".into(),

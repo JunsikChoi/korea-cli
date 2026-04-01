@@ -3,6 +3,28 @@ use crate::core::{bundle::BUNDLE, caller};
 use anyhow::Result;
 
 pub async fn run(list_id: &str, operation: &str, params: &[(String, String)]) -> Result<()> {
+    // Check spec availability before attempting call
+    if !BUNDLE.specs.contains_key(list_id) {
+        let entry = BUNDLE.catalog.iter().find(|e| e.list_id == list_id);
+        let response = match entry {
+            Some(entry) => serde_json::json!({
+                "success": false,
+                "list_id": list_id,
+                "spec_status": entry.spec_status,
+                "message": entry.spec_status.user_message(),
+                "endpoint_url": entry.endpoint_url,
+                "data_go_kr_url": format!("https://www.data.go.kr/data/{list_id}/openapi.do"),
+            }),
+            None => serde_json::json!({
+                "success": false,
+                "error": "NOT_FOUND",
+                "message": format!("API를 찾을 수 없습니다: {list_id}"),
+            }),
+        };
+        println!("{}", serde_json::to_string_pretty(&response)?);
+        return Ok(());
+    }
+
     let cfg = AppConfig::load()?;
     let api_key = match cfg.resolve_api_key() {
         Some(key) => key,
@@ -18,11 +40,7 @@ pub async fn run(list_id: &str, operation: &str, params: &[(String, String)]) ->
         }
     };
 
-    let spec = BUNDLE
-        .specs
-        .get(list_id)
-        .ok_or_else(|| anyhow::anyhow!("API spec을 찾을 수 없습니다: {list_id}"))?;
-
+    let spec = BUNDLE.specs.get(list_id).unwrap();
     let result = caller::call_api(spec, operation, params, &api_key).await?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())

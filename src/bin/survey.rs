@@ -66,6 +66,147 @@ struct SurveyReport {
     entries: Vec<ApiSurveyEntry>,
 }
 
+struct PageAnalysis {
+    has_swagger_json: bool,
+    has_swagger_url: bool,
+    swagger_url_value: Option<String>,
+    swagger_ops_count: Option<usize>,
+    swagger_error: Option<String>,
+    has_html_pk: bool,
+    html_pk_value: Option<String>,
+    html_ops_count: usize,
+    anomalies: Vec<String>,
+}
+
+/// openapi.do HTML 페이지를 분석하여 모든 신호를 추출한다.
+/// HTTP 호출 없이 순수하게 HTML 문자열만 받아 분석.
+fn analyze_page(html: &str) -> PageAnalysis {
+    // Swagger 탐지
+    let swagger_json = korea_cli::core::swagger::extract_swagger_json(html);
+    let swagger_url = korea_cli::core::swagger::extract_swagger_url(html);
+
+    let (swagger_ops_count, swagger_error) = if let Some(ref json) = swagger_json {
+        match korea_cli::core::swagger::parse_swagger("_survey", json) {
+            Ok(spec) => (Some(spec.operations.len()), None),
+            Err(e) => (None, Some(e.to_string())),
+        }
+    } else {
+        (None, None)
+    };
+
+    // HTML 스펙 탐지
+    let html_result = korea_cli::core::html_parser::parse_openapi_page(html);
+    let (has_html_pk, html_pk_value, html_ops_count) = match html_result {
+        Ok(info) => (true, Some(info.public_data_detail_pk), info.operations.len()),
+        Err(_) => (false, None, 0),
+    };
+
+    // 예상치 못한 패턴 탐지
+    let anomalies = detect_anomalies(html, &swagger_json, &swagger_url, has_html_pk);
+
+    PageAnalysis {
+        has_swagger_json: swagger_json.is_some(),
+        has_swagger_url: swagger_url.is_some(),
+        swagger_url_value: swagger_url,
+        swagger_ops_count,
+        swagger_error,
+        has_html_pk,
+        html_pk_value,
+        html_ops_count,
+        anomalies,
+    }
+}
+
+/// 예상치 못한 패턴 탐지 — 우리가 아직 모르는 케이스를 찾아낸다.
+fn detect_anomalies(
+    html: &str,
+    swagger_json: &Option<serde_json::Value>,
+    swagger_url: &Option<String>,
+    has_html_pk: bool,
+) -> Vec<String> {
+    let mut anomalies = Vec::new();
+
+    // 1. Swagger JSON이 있는데 operation이 0개 (skeleton)
+    if let Some(json) = swagger_json {
+        if let Some(paths) = json.get("paths").and_then(|p| p.as_object()) {
+            if paths.is_empty() {
+                anomalies.push("swagger_empty_paths".into());
+            }
+        } else {
+            anomalies.push("swagger_no_paths_field".into());
+        }
+
+        // swagger version이 2.0이 아닌 경우
+        let version = json.get("swagger").and_then(|v| v.as_str()).unwrap_or("");
+        if !version.is_empty() && version != "2.0" {
+            anomalies.push(format!("swagger_version_{version}"));
+        }
+
+        // openapi 3.x 형태인 경우
+        if json.get("openapi").is_some() {
+            let oa_ver = json["openapi"].as_str().unwrap_or("unknown");
+            anomalies.push(format!("openapi3_{oa_ver}"));
+        }
+    }
+
+    // 2. Swagger도 없고 HTML pk도 없는 페이지
+    if swagger_json.is_none() && swagger_url.is_none() && !has_html_pk {
+        anomalies.push("no_swagger_no_html_pk".into());
+    }
+
+    // 3. iframe 존재 (외부 문서 임베딩)
+    if html.contains("<iframe") || html.contains("<IFRAME") {
+        anomalies.push("has_iframe".into());
+    }
+
+    // 4. "서비스 종료" 또는 "폐기" 문구
+    if html.contains("서비스 종료") || html.contains("서비스종료") {
+        anomalies.push("service_terminated".into());
+    }
+    if html.contains("폐기") {
+        anomalies.push("deprecated_notice".into());
+    }
+
+    // 5. 리다이렉트 안내
+    if html.contains("meta http-equiv=\"refresh\"") || html.contains("meta http-equiv='refresh'") {
+        anomalies.push("meta_redirect".into());
+    }
+    if html.contains("location.href") || html.contains("location.replace") {
+        if !html.contains("swaggerUrl") {
+            anomalies.push("js_redirect".into());
+        }
+    }
+
+    // 6. 로그인 필요
+    if html.contains("로그인이 필요") || html.contains("login") && html.contains("session") {
+        anomalies.push("login_required".into());
+    }
+
+    // 7. SOAP/WSDL
+    if html.contains("wsdl") || html.contains("WSDL") || html.contains("soap:") {
+        anomalies.push("soap_wsdl_detected".into());
+    }
+
+    // 8. GraphQL
+    if html.contains("graphql") || html.contains("GraphQL") {
+        anomalies.push("graphql_detected".into());
+    }
+
+    // 9. swaggerJson 변수가 있지만 파싱 안 됨
+    if swagger_json.is_none()
+        && (html.contains("swaggerJson") || html.contains("swagger_json"))
+    {
+        anomalies.push("swagger_json_var_but_unparsed".into());
+    }
+
+    // 10. 페이지가 비정상적으로 짧음
+    if html.len() < 1000 {
+        anomalies.push(format!("very_short_page_{}_bytes", html.len()));
+    }
+
+    anomalies
+}
+
 fn main() {
     // TODO: Task 5에서 구현
 }
@@ -100,6 +241,98 @@ mod tests {
         assert_eq!(decoded.list_id, "15084084");
         assert_eq!(decoded.swagger_ops_count, Some(3));
         assert_eq!(decoded.html_ops_count, 2);
+    }
+
+    #[test]
+    fn test_analyze_page_swagger_available() {
+        // 1000바이트 이상이어야 very_short_page anomaly가 안 뜸
+        let padding = " ".repeat(800);
+        let html = format!(
+            r#"
+            <html><body>
+            <input type="hidden" name="publicDataDetailPk" value="uddi:abc123">
+            <select id="open_api_detail_select">
+                <option value="1">op1</option>
+            </select>
+            <script>
+            var swaggerJson = `{{"swagger":"2.0","host":"api.test.kr","basePath":"/","schemes":["https"],"paths":{{"/items":{{"get":{{"summary":"test","parameters":[],"responses":{{"200":{{}}}}}}}}}}}}`
+            </script>
+            <!-- {padding} -->
+            </body></html>
+        "#
+        );
+
+        let analysis = analyze_page(&html);
+        assert!(analysis.has_swagger_json);
+        assert!(!analysis.has_swagger_url);
+        assert_eq!(analysis.swagger_ops_count, Some(1));
+        assert!(analysis.has_html_pk);
+        assert_eq!(analysis.html_pk_value.as_deref(), Some("uddi:abc123"));
+        assert_eq!(analysis.html_ops_count, 1);
+        assert!(analysis.anomalies.is_empty(), "unexpected anomalies: {:?}", analysis.anomalies);
+    }
+
+    #[test]
+    fn test_analyze_page_html_only() {
+        let html = r#"
+            <html><body>
+            <input type="hidden" name="publicDataDetailPk" value="uddi:xyz789">
+            <select id="open_api_detail_select">
+                <option value="101">getWeather</option>
+                <option value="102">getForecast</option>
+            </select>
+            <script>
+            var someOtherVar = 'hello';
+            </script>
+            </body></html>
+        "#;
+
+        let analysis = analyze_page(html);
+        assert!(!analysis.has_swagger_json);
+        assert!(!analysis.has_swagger_url);
+        assert_eq!(analysis.swagger_ops_count, None);
+        assert!(analysis.has_html_pk);
+        assert_eq!(analysis.html_ops_count, 2);
+        assert!(!analysis.anomalies.contains(&"swagger_json_var_but_unparsed".to_string()));
+    }
+
+    #[test]
+    fn test_analyze_page_swagger_skeleton() {
+        let html = r#"
+            <html><body>
+            <script>
+            var swaggerJson = `{"swagger":"2.0","host":"api.test.kr","basePath":"/","schemes":["https"],"paths":{}}`
+            </script>
+            </body></html>
+        "#;
+
+        let analysis = analyze_page(html);
+        assert!(analysis.has_swagger_json);
+        assert_eq!(analysis.swagger_ops_count, Some(0));
+        assert!(analysis.anomalies.contains(&"swagger_empty_paths".to_string()));
+    }
+
+    #[test]
+    fn test_detect_anomalies_terminated_service() {
+        let html = "<html><body>이 API는 서비스 종료되었습니다.</body></html>";
+        let anomalies = detect_anomalies(html, &None, &None, false);
+        assert!(anomalies.contains(&"service_terminated".to_string()));
+        assert!(anomalies.contains(&"no_swagger_no_html_pk".to_string()));
+    }
+
+    #[test]
+    fn test_detect_anomalies_soap() {
+        let html = "<html><body>WSDL endpoint: http://example.kr/service?wsdl</body></html>";
+        let anomalies = detect_anomalies(html, &None, &None, false);
+        assert!(anomalies.contains(&"soap_wsdl_detected".to_string()));
+    }
+
+    #[test]
+    fn test_detect_anomalies_unparsed_swagger_var() {
+        let html =
+            r#"<html><body><script>var swaggerJson = JSON.parse(data);</script></body></html>"#;
+        let anomalies = detect_anomalies(html, &None, &None, false);
+        assert!(anomalies.contains(&"swagger_json_var_but_unparsed".to_string()));
     }
 
     #[test]

@@ -42,6 +42,10 @@ path = "src/bin/build_bundle.rs"
 name = "survey"
 path = "src/bin/survey.rs"
 
+[[bin]]
+name = "html-survey"
+path = "src/bin/html_survey.rs"
+
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"

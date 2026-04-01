@@ -228,6 +228,54 @@ Codex가 실제 API를 search → spec → call 흐름으로 사용하면서 다
 - **html_parser build_bundle 연결 보류**: 파서 모듈 + 테스트는 완성했으나, 실제 번들 빌더 연결은 후속 작업으로 분리 (네트워크 의존성)
 
 ### 다음 작업
+- ~~API 전수조사 설계 + 구현~~ ✓
 - html_parser를 build_bundle에 연결하여 ~1,200개 HtmlOnly API → Available 승격
 - CI 수집 파이프라인 (GitHub Actions cron)
 - Phase 1.1 호출 엔진 안정화 (XML, 인증 일반화)
+
+---
+
+## 2026-04-02: API 전수조사 (survey) 실행 + 결과 분석
+
+### 배경
+이전 세션에서 추정치로 분류했던 12K API의 실제 분포를 전수조사로 확인.
+`src/bin/survey.rs` 바이너리를 구현하여 모든 openapi.do 페이지를 실제로 방문하고 분석.
+
+### 완료
+- survey 바이너리 구현 (7개 커밋, TDD 기반)
+  - `SurveyResult` 구조체, `analyze_page`, `detect_anomalies`, `survey_single_api`, `main` 파이프라인
+  - `--resume` 이어하기 기능, `--concurrency`/`--delay` 조절
+- 전수조사 실행: 12,108개 API, 28.4분 소요
+- 상세 결과 보고서 작성: `data/survey-report.md`
+
+### 핵심 결과 — 실측 vs 이전 추정
+
+| 분류 | 실측 | 이전 추정 | 차이 |
+|------|---:|---:|------|
+| Available | 3,949 | ~3,960 | 거의 일치 |
+| Skeleton | 1,404 | ~1,400 | 거의 일치 |
+| External | 4,652 | ~2,500 | **+2,152** (대폭 증가) |
+| CatalogOnly | 2,101 | ~2,500 | -399 |
+| HtmlOnly | 2 | ~1,200 | **-1,198** (사실상 소멸) |
+
+### 핵심 발견
+
+1. **HtmlOnly 사실상 소멸 (2건)**: 이전에 ~1,200건으로 추정했던 "Gateway API인데 Swagger 미생성" 카테고리가 실측 2건으로 급감. 원인은 endpoint_url이 `' '`(공백 1자)인 API 8,883건이 External로 분류된 것. `SpecStatus::classify`의 빈 URL 판정이 공백을 처리하지 않아서 발생.
+
+2. **login_required anomaly 99.8% 오탐**: openapi.do 페이지의 공통 레이아웃에 login/session 관련 텍스트가 항상 포함. Swagger inline JSON은 로그인 없이도 렌더링되지만, HTML pk는 전혀 탐지되지 않음.
+
+3. **swagger_json_var_but_unparsed 6,732건**: `swaggerJson` 변수명이 HTML에 존재하지만 값이 비어있는 케이스. External/CatalogOnly API에서 포탈이 변수만 선언하고 값을 채우지 않은 것으로 추정.
+
+4. **endpoint_url 데이터 품질**: 73.4%가 `' '`(공백), 21.5%가 빈 문자열. `extract_domain`에서 trim 처리 누락.
+
+### 개선 필요 항목
+- `SpecStatus::classify`에서 endpoint_url trim 처리 → HtmlOnly 재분류
+- `login_required` anomaly 로직 개선 (공통 레이아웃 제외)
+- 브라우저 세션 로그인 후 HTML pk 탐지 재검증
+- `survey.json`은 7.5MB이므로 `.gitignore`에 추가
+
+### 다음 작업
+- endpoint_url trim 패치 → 번들 리빌드로 HtmlOnly 정확한 수 확인
+- html_parser를 build_bundle에 연결
+- CI 수집 파이프라인
+- Phase 1.1 호출 엔진 안정화

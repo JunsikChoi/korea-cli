@@ -207,6 +207,20 @@ fn detect_anomalies(
     anomalies
 }
 
+/// endpoint URL에서 도메인 패턴을 추출한다.
+fn extract_domain(url: &str) -> String {
+    if url.is_empty() {
+        return "(empty)".into();
+    }
+    url.split("//")
+        .nth(1)
+        .unwrap_or(url)
+        .split('/')
+        .next()
+        .unwrap_or(url)
+        .to_string()
+}
+
 fn main() {
     // TODO: Task 5에서 구현
 }
@@ -214,6 +228,27 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extract_domain() {
+        assert_eq!(
+            extract_domain("https://apis.data.go.kr/1360000/Weather"),
+            "apis.data.go.kr"
+        );
+        assert_eq!(
+            extract_domain("https://api.odcloud.kr/api/test"),
+            "api.odcloud.kr"
+        );
+        assert_eq!(
+            extract_domain("https://apihub.kma.go.kr/api"),
+            "apihub.kma.go.kr"
+        );
+        assert_eq!(extract_domain(""), "(empty)");
+        assert_eq!(
+            extract_domain("http://example.com:8080/path"),
+            "example.com:8080"
+        );
+    }
 
     #[test]
     fn test_survey_entry_json_roundtrip() {

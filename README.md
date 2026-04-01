@@ -161,15 +161,16 @@ korea-cli/
 │   ├── cli/             # CLI 서브커맨드 핸들러
 │   ├── config/          # 설정 관리 (API 키, 환경변수)
 │   └── bin/
-│       └── build_bundle.rs  # 번들 생성 도구 (릴리스용)
+│       ├── build_bundle.rs  # 번들 생성 도구 (릴리스용)
+│       ├── survey.rs        # API 전수조사 (Swagger/HTML 신호 분석)
+│       └── html_survey.rs   # HTML 스펙 전수조사 (pk/AJAX 프로브)
 ├── build.rs             # 개발용 placeholder 번들 자동 생성
 ├── tests/               # 통합 테스트
 ├── docs/
 │   ├── roadmap/         # 장기 로드맵 (Phase 1~3)
 │   ├── devlogs/         # 개발 로그
-│   └── superpowers/     # 설계 스펙 & 구현 플랜
-│       ├── specs/       # 브레인스토밍 결과 (설계 문서)
-│       └── plans/       # 구현 계획 (태스크별 체크박스)
+│   ├── specs/           # 설계 스펙 (아키텍처 결정)
+│   └── plans/           # 구현 계획 (태스크별 체크박스)
 ├── website/             # koreacli.com 소스
 ├── Cargo.toml
 └── LICENSE              # MIT
@@ -183,6 +184,8 @@ korea-cli/
 | [MVP 설계 스펙](docs/specs/2026-03-31-phase1-mvp-design.md) | 아키텍처, 데이터 모델, MCP 도구 설계 |
 | [MVP 구현 플랜](docs/plans/2026-03-31-phase1-mvp.md) | 태스크별 상세 구현 단계 (TDD 기반) |
 | [Spec 품질 개선 설계](docs/plans/2026-04-01-spec-quality-design.md) | SpecStatus, 스키마 버전, HTML 파서 설계 |
+| [API 전수조사 보고서](data/survey-report.md) | 12,108 API Swagger/HTML 신호 전수분석 |
+| [HTML 스펙 전수조사](data/html-survey-report.md) | HTML 폴백 경로 전수조사 — 커버리지 32.6%→53.5% |
 
 ## 로드맵
 

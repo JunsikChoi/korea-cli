@@ -275,7 +275,68 @@ Codex가 실제 API를 search → spec → call 흐름으로 사용하면서 다
 - `survey.json`은 7.5MB이므로 `.gitignore`에 추가
 
 ### 다음 작업
-- endpoint_url trim 패치 → 번들 리빌드로 HtmlOnly 정확한 수 확인
-- html_parser를 build_bundle에 연결
-- CI 수집 파이프라인
+- ~~HTML 스펙 추출 전수조사 (셀렉터 버그 수정 + AJAX 프로브)~~ ✓
+
+---
+
+## 2026-04-02: HTML 스펙 전수조사 — "로그인 벽" 오진 해결
+
+### 배경
+1차 전수조사에서 "login_required 99.8%, HTML pk 탐지 0건"이라는 결과가 나와 "로그인 벽" 때문에 HTML 스펙 추출이 불가능하다고 진단했으나, 사용자가 직접 브라우저에서 확인한 결과 로그인 벽이 없었다. 근본 원인을 조사하고 재전수조사를 실행.
+
+### 핵심 발견: 로그인 벽이 아닌 셀렉터 버그
+
+**1차 진단 (오진)**: "비로그인 상태에서 publicDataDetailPk가 렌더링되지 않음"
+**실제 원인**: `html_parser.rs:159`의 CSS 셀렉터가 `input[name="publicDataDetailPk"]`를 찾고 있었으나, 실제 HTML은 `<input id="publicDataDetailPk" value="uddi:...">`로 **`id=` 속성**을 사용. 한 줄 버그로 12,108건 전부 탐지 실패.
+
+추가 검증:
+- `curl`로 비로그인 openapi.do 접근: HTTP 200, 완전한 HTML 반환
+- `publicDataDetailPk` hidden input: `id=` 속성으로 정상 존재
+- `selectApiDetailFunction.do` AJAX: **Referer 헤더만 추가하면 비로그인으로 100% 작동**
+- **CI 완전 호환** — 브라우저 없이 순수 HTTP로 추출 가능
+
+### 완료
+- `html_parser.rs` 셀렉터 수정: `id=` 우선 → `name=` 폴백 → regex 폴백 (3단계)
+- `html-survey` 바이너리 구현 (27개 테스트, 2-phase 조사)
+  - Phase 1: openapi.do 페이지 분석 (pk/select/swagger)
+  - Phase 2: AJAX 프로브 (`selectApiDetailFunction.do` 실제 호출)
+- 전수조사 실행: 12,108 API, 26.2분 소요
+
+### 전수조사 결과
+
+| 항목 | 수 | 비율 |
+|------|---:|-----:|
+| pk 탐지 성공 (`id=`) | 12,098 | 99.9% |
+| select 옵션 1개+ | 3,186 | 26.3% |
+| AJAX 프로브 성공 (요청주소+파라미터) | 2,522 | 79.2% (대상 중) |
+| AJAX 에러 | 0 | 0% |
+
+**커버리지 개선:**
+
+| 구분 | 수 | 비율 |
+|------|---:|-----:|
+| 현재 Available (Swagger) | 3,953 | 32.6% |
+| **신규 추출 가능 (HTML AJAX)** | **2,522** | **20.8%** |
+| **합계** | **6,475** | **53.5%** |
+| 나머지 미커버 | 5,633 | 46.5% |
+
+**Swagger와 HTML은 상호 배타적**: Swagger 있는 API는 select 옵션 0개, HTML select 있는 API는 Swagger 비어있음. 2경로 폴백 체인으로 설계 가능.
+
+**미커버 5,633건 분류:**
+- operation 미등록 (pk_no_options): 4,899 — 기관이 데이터 입력 안 함
+- 폐기/서비스 종료: 282
+- AJAX 부분 성공 (서비스URL만): 662 — 부분 추출 가능성
+- Skeleton: 1,405 — select 옵션도 0개, 진정한 빈 등록 (pk_no_options와 별개)
+- pk 미발견: 10 — JS 리다이렉트/네트워크 에러
+
+### 핵심 결정
+- **1차 전수조사의 "로그인 벽" 진단은 폐기** — 실제 원인은 CSS 셀렉터 버그
+- **build_bundle에 HTML 폴백 추가**: Swagger 실패 → pk+AJAX → parse_operation_detail → 스펙 생성
+- **AJAX 호출에 Referer 헤더 필수**: `https://www.data.go.kr/data/{list_id}/openapi.do`
+- **td_fallback 파라미터 스타일이 100%**: AJAX 응답에서 `data-paramtr-nm` 사용 0건
+
+### 다음 작업
+- build_bundle.rs에 HTML 폴백 경로 구현 (2,522개 신규 스펙 추출)
+- 부분 성공 662건 파서 보강 (서비스URL 폴백)
+- CI 수집 파이프라인 (GitHub Actions cron)
 - Phase 1.1 호출 엔진 안정화

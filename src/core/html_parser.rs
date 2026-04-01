@@ -155,19 +155,31 @@ pub fn build_api_spec(list_id: &str, parsed_ops: &[ParsedOperation]) -> Option<A
 // ── Internal helpers ──
 
 fn extract_public_data_detail_pk(document: &Html, raw_html: &str) -> Option<String> {
-    // Try hidden input first
-    let sel = Selector::parse(r#"input[name="publicDataDetailPk"]"#).ok()?;
-    if let Some(el) = document.select(&sel).next() {
-        if let Some(val) = el.value().attr("value") {
-            if !val.is_empty() {
-                return Some(val.to_string());
+    // 1) id= 셀렉터 (실제 data.go.kr 구조)
+    if let Ok(sel) = Selector::parse(r#"input#publicDataDetailPk"#) {
+        if let Some(el) = document.select(&sel).next() {
+            if let Some(val) = el.value().attr("value") {
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
             }
         }
     }
 
-    // Fallback: regex in raw HTML (handles multiline cases)
+    // 2) name= 셀렉터 (하위 호환)
+    if let Ok(sel) = Selector::parse(r#"input[name="publicDataDetailPk"]"#) {
+        if let Some(el) = document.select(&sel).next() {
+            if let Some(val) = el.value().attr("value") {
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+
+    // 3) regex fallback (id= 또는 name= 모두 매칭)
     let re = regex::Regex::new(
-        r#"(?s)name\s*=\s*["']?publicDataDetailPk["']?\s+value\s*=\s*["']([^"']+)["']"#,
+        r#"(?s)(?:name|id)\s*=\s*["']?publicDataDetailPk["']?\s+value\s*=\s*["']([^"']+)["']"#,
     )
     .ok()?;
     re.captures(raw_html)
@@ -493,6 +505,31 @@ mod tests {
         assert_eq!(spec.operations[0].parameters.len(), 1);
         assert_eq!(spec.operations[0].parameters[0].name, "pageNo");
         assert_eq!(spec.operations[0].response_fields.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_openapi_page_id_attribute() {
+        // 실제 data.go.kr HTML은 id= 사용 (name= 아님)
+        let html = r#"
+        <html><body>
+            <input type="hidden" id="publicDataDetailPk"
+                   value="uddi:b295d381-f52d-4318-9191-96fe1fafff1f"/>
+            <input type="hidden" id="publicDataPk" value="15061357"/>
+            <select id="open_api_detail_select">
+                <option value="25356">선물사일반현황조회</option>
+                <option value="25357">선물사재무현황조회</option>
+            </select>
+        </body></html>
+        "#;
+
+        let info = parse_openapi_page(html).unwrap();
+        assert_eq!(
+            info.public_data_detail_pk,
+            "uddi:b295d381-f52d-4318-9191-96fe1fafff1f"
+        );
+        assert_eq!(info.operations.len(), 2);
+        assert_eq!(info.operations[0].seq_no, "25356");
+        assert_eq!(info.operations[0].name, "선물사일반현황조회");
     }
 
     #[test]

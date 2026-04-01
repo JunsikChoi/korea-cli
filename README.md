@@ -178,7 +178,7 @@ korea-cli/
 | 문서 | 용도 |
 |------|------|
 | [Phase 1 로드맵](docs/roadmap/phase1-mvp.md) | 장기 마일스톤 체크리스트 (Phase 1~3) |
-| [MVP 설계 스펙](docs/superpowers/specs/2026-03-31-phase1-mvp-design.md) | 아키텍처, 데이터 모델, MCP 도구 설계 |
+| [MVP 설계 스펙](docs/specs/2026-03-31-phase1-mvp-design.md) | 아키텍처, 데이터 모델, MCP 도구 설계 |
 | [MVP 구현 플랜](docs/plans/2026-03-31-phase1-mvp.md) | 태스크별 상세 구현 단계 (TDD 기반) |
 
 ## 로드맵

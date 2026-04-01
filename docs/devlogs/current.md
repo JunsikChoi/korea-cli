@@ -105,9 +105,9 @@ Codex가 실제 API를 search → spec → call 흐름으로 사용하면서 다
 ## 2026-03-31: 번들 전환 설계 + 구현 계획 완료
 
 ### 완료
-- 번들 전환 설계 스펙 작성: `docs/superpowers/specs/2026-03-31-bundle-transition-design.md`
+- 번들 전환 설계 스펙 작성: `docs/specs/2026-03-31-bundle-transition-design.md`
 - 구현 플랜 작성 (11 Task, TDD 기반): `docs/plans/2026-03-31-bundle-transition.md`
-- docs 경로 통일: spec → `docs/superpowers/specs/`, plan → `docs/plans/`
+- docs 경로 통일: spec → `docs/specs/`, plan → `docs/plans/`
 
 ### 핵심 결정
 - **직렬화**: postcard (serde 호환, JSON 대비 40-60% 작음)

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust, postcard (binary serde), zstd (compression), once_cell (lazy static), tokio (async)
 
-**Spec:** `docs/superpowers/specs/2026-03-31-bundle-transition-design.md`
+**Spec:** `docs/specs/2026-03-31-bundle-transition-design.md`
 
 ---
 

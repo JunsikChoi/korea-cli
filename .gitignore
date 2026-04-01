@@ -5,3 +5,4 @@
 .DS_Store
 .superpowers
 data/bundle.zstd
+data/survey.json

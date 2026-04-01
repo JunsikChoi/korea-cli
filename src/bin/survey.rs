@@ -106,7 +106,11 @@ fn analyze_page(html: &str) -> PageAnalysis {
     // HTML 스펙 탐지
     let html_result = korea_cli::core::html_parser::parse_openapi_page(html);
     let (has_html_pk, html_pk_value, html_ops_count) = match html_result {
-        Ok(info) => (true, Some(info.public_data_detail_pk), info.operations.len()),
+        Ok(info) => (
+            true,
+            Some(info.public_data_detail_pk),
+            info.operations.len(),
+        ),
         Err(_) => (false, None, 0),
     };
 
@@ -180,10 +184,10 @@ fn detect_anomalies(
     if html.contains("meta http-equiv=\"refresh\"") || html.contains("meta http-equiv='refresh'") {
         anomalies.push("meta_redirect".into());
     }
-    if html.contains("location.href") || html.contains("location.replace") {
-        if !html.contains("swaggerUrl") {
-            anomalies.push("js_redirect".into());
-        }
+    if (html.contains("location.href") || html.contains("location.replace"))
+        && !html.contains("swaggerUrl")
+    {
+        anomalies.push("js_redirect".into());
     }
 
     // 6. 로그인 필요
@@ -202,9 +206,7 @@ fn detect_anomalies(
     }
 
     // 9. swaggerJson 변수가 있지만 파싱 안 됨
-    if swagger_json.is_none()
-        && (html.contains("swaggerJson") || html.contains("swagger_json"))
-    {
+    if swagger_json.is_none() && (html.contains("swaggerJson") || html.contains("swagger_json")) {
         anomalies.push("swagger_json_var_but_unparsed".into());
     }
 
@@ -393,7 +395,7 @@ async fn main() -> Result<()> {
                 let entry = survey_single_api(&client, &list_id, &title, &endpoint_url).await;
 
                 let count = done.fetch_add(1, Ordering::Relaxed) + 1;
-                if count % 500 == 0 {
+                if count.is_multiple_of(500) {
                     eprintln!("  진행: {count}/{total}");
                 }
 
@@ -413,7 +415,10 @@ async fn main() -> Result<()> {
     }
     let all_entries: Vec<ApiSurveyEntry> = existing.into_values().collect();
 
-    let surveyed_count = all_entries.iter().filter(|e| e.fetch_error.is_none()).count();
+    let surveyed_count = all_entries
+        .iter()
+        .filter(|e| e.fetch_error.is_none())
+        .count();
     let failed_count = all_entries.len() - surveyed_count;
 
     let report = SurveyReport {
@@ -512,7 +517,9 @@ fn print_summary(report: &SurveyReport) {
     // Endpoint 도메인 분포
     let mut domain_counts: HashMap<String, usize> = HashMap::new();
     for entry in &report.entries {
-        *domain_counts.entry(entry.endpoint_domain.clone()).or_default() += 1;
+        *domain_counts
+            .entry(entry.endpoint_domain.clone())
+            .or_default() += 1;
     }
     let mut domains: Vec<_> = domain_counts.into_iter().collect();
     domains.sort_by(|a, b| b.1.cmp(&a.1));
@@ -525,7 +532,9 @@ fn print_summary(report: &SurveyReport) {
     // SpecStatus 분류 분포
     let mut status_counts: HashMap<String, usize> = HashMap::new();
     for entry in &report.entries {
-        *status_counts.entry(entry.current_classification.clone()).or_default() += 1;
+        *status_counts
+            .entry(entry.current_classification.clone())
+            .or_default() += 1;
     }
     eprintln!("\n[현재 SpecStatus 분류]");
     for (status, count) in &status_counts {
@@ -658,7 +667,11 @@ mod tests {
         assert!(analysis.has_html_pk);
         assert_eq!(analysis.html_pk_value.as_deref(), Some("uddi:abc123"));
         assert_eq!(analysis.html_ops_count, 1);
-        assert!(analysis.anomalies.is_empty(), "unexpected anomalies: {:?}", analysis.anomalies);
+        assert!(
+            analysis.anomalies.is_empty(),
+            "unexpected anomalies: {:?}",
+            analysis.anomalies
+        );
     }
 
     #[test]
@@ -682,7 +695,9 @@ mod tests {
         assert_eq!(analysis.swagger_ops_count, None);
         assert!(analysis.has_html_pk);
         assert_eq!(analysis.html_ops_count, 2);
-        assert!(!analysis.anomalies.contains(&"swagger_json_var_but_unparsed".to_string()));
+        assert!(!analysis
+            .anomalies
+            .contains(&"swagger_json_var_but_unparsed".to_string()));
     }
 
     #[test]
@@ -698,7 +713,9 @@ mod tests {
         let analysis = analyze_page(html);
         assert!(analysis.has_swagger_json);
         assert_eq!(analysis.swagger_ops_count, Some(0));
-        assert!(analysis.anomalies.contains(&"swagger_empty_paths".to_string()));
+        assert!(analysis
+            .anomalies
+            .contains(&"swagger_empty_paths".to_string()));
     }
 
     #[test]

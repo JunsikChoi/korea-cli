@@ -202,6 +202,32 @@ Codex가 실제 API를 search → spec → call 흐름으로 사용하면서 다
   - Swagger 미생성 gateway API도 endpoint URL을 알면 향후 HTML 파싱과 결합 가능
 
 ### 다음 작업
-- CatalogEntry에 endpoint_url 필드 추가 + 번들 빌더 반영
-- skeleton spec 필터링 로직 추가
-- HTML 테이블 파싱 PoC (기상청 단기예보 대상)
+- ~~CatalogEntry에 endpoint_url 필드 추가 + 번들 빌더 반영~~ ✓
+- ~~skeleton spec 필터링 로직 추가~~ ✓
+- ~~HTML 테이블 파싱 PoC~~ ✓
+
+---
+
+## 2026-04-01: Spec 품질 개선 구현 완료
+
+### 완료
+- SpecStatus enum (Available/Skeleton/HtmlOnly/External/CatalogOnly/Unsupported)
+- BundleMetadata에 schema_version 추가 (v1→v2), 구 번들 graceful fallback
+- CatalogEntry에 endpoint_url, spec_status 필드 추가
+- SearchEntry에 spec_status, endpoint_url 필드 추가
+- 번들 빌더에서 skeleton spec 제거 + SpecStatus::classify() 자동 분류
+- HTML 테이블 파서 모듈 (scraper 크레이트, data.go.kr AJAX 파싱)
+- CLI/MCP에서 spec 없는 API 조회 시 상태 안내 + endpoint_url 제공
+- build.rs placeholder 번들 스키마 v2 대응
+- 90개 테스트 통과 (39 lib + 51 통합/바이너리)
+
+### 핵심 결정
+- **postcard 스키마 호환성**: schema_version 필드로 버전 관리, 역직렬화 실패 시 내장 번들 폴백. 크래시 없는 graceful degradation
+- **SpecStatus 설계**: AI 에이전트가 1필드로 즉시 판단 가능한 단순 enum 채택. endpoint_url이 이미 있으므로 EndpointType::External(String) 패턴 불필요
+- **scraper 크레이트 채택**: data.go.kr HTML 테이블 파싱용. regex 대비 구조적 파싱에 안정적
+- **html_parser build_bundle 연결 보류**: 파서 모듈 + 테스트는 완성했으나, 실제 번들 빌더 연결은 후속 작업으로 분리 (네트워크 의존성)
+
+### 다음 작업
+- html_parser를 build_bundle에 연결하여 ~1,200개 HtmlOnly API → Available 승격
+- CI 수집 파이프라인 (GitHub Actions cron)
+- Phase 1.1 호출 엔진 안정화 (XML, 인증 일반화)

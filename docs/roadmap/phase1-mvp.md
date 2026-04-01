@@ -56,15 +56,13 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 - [x] 초기 번들 생성 (수동 1회 수집) — 12,080 APIs + 5,363 specs, 2.77 MB
 - [x] Spec 미수집 API 분석 → 유효 spec ~3,960 / skeleton ~1,400 / 미생성 ~1,200 / 외부 ~5,500
 
-### 1. Spec 품질 개선
-- [ ] CatalogEntry에 `endpoint_url` 필드 추가 + 번들 빌더 반영
-  - 외부 링크 API: 원본 포탈 URL 안내 가능 (예: lofin365.go.kr)
-  - Swagger 미생성 API: endpoint URL 보존 → 향후 HTML 파싱과 결합
-- [ ] Skeleton spec 필터링 — `operations.is_empty()` spec 제거 또는 `spec_status` 태깅
-- [ ] CatalogEntry에 `spec_status` 필드 추가 (has_spec / skeleton / html_only / external / none)
-- [ ] HTML 테이블 파싱 PoC — `apis.data.go.kr` endpoint 있지만 Swagger 없는 ~1,200개 대상
-  - 대상: 기상청 단기예보 (53,803건), 에어코리아 (51,347건) 등 인기 API
-  - openapi.do 페이지의 오퍼레이션 테이블에서 파라미터/응답 추출
+### 1. Spec 품질 개선 ✅
+- [x] CatalogEntry에 `endpoint_url` 필드 추가 + 번들 빌더 반영
+- [x] Skeleton spec 필터링 — `operations.is_empty()` spec 제거 + `SpecStatus` enum 태깅
+- [x] CatalogEntry에 `spec_status: SpecStatus` 필드 추가 (Available/Skeleton/HtmlOnly/External/CatalogOnly/Unsupported)
+- [x] HTML 테이블 파싱 모듈 (`scraper` 크레이트) — 번들 빌더 연결은 후속
+- [x] 번들 스키마 v2 (schema_version) + 구 번들 graceful fallback
+- [x] CLI/MCP spec_status 기반 안내 응답
 
 ### 2. CI 수집 파이프라인
 - [ ] GitHub Actions 크론으로 data.go.kr 전체 Swagger spec 수집

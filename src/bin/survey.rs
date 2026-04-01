@@ -304,6 +304,23 @@ async fn survey_single_api(
     }
 }
 
+/// 기존 조사 결과 파일에서 이미 조사된 list_id 목록을 로드한다.
+fn load_existing_survey(path: &str) -> HashMap<String, ApiSurveyEntry> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return HashMap::new(),
+    };
+    let report: SurveyReport = match serde_json::from_str(&content) {
+        Ok(r) => r,
+        Err(_) => return HashMap::new(),
+    };
+    report
+        .entries
+        .into_iter()
+        .map(|e| (e.list_id.clone(), e))
+        .collect()
+}
+
 #[derive(Clone)]
 struct SurveyConfig {
     api_key: String,
@@ -323,10 +340,33 @@ async fn main() -> Result<()> {
     let services = fetch_all_services(&config.api_key).await?;
     eprintln!("  {} 서비스 수집 완료", services.len());
 
+    // Resume: 기존 결과 로드
+    let args: Vec<String> = std::env::args().collect();
+    let resume = args.iter().any(|a| a == "--resume");
+    let mut existing = if resume {
+        let loaded = load_existing_survey(&config.output);
+        if !loaded.is_empty() {
+            eprintln!("  기존 조사 결과 {} 건 로드 (이어하기)", loaded.len());
+        }
+        loaded
+    } else {
+        HashMap::new()
+    };
+
     // Step 2: 전수조사
+    let services_to_survey: Vec<_> = services
+        .iter()
+        .filter(|svc| !existing.contains_key(&svc.list_id))
+        .collect();
+
     eprintln!(
         "\n=== Step 2/3: openapi.do 전수조사 (동시 {}건) ===",
         config.concurrency
+    );
+    eprintln!(
+        "  신규 조사 대상: {} / 기존: {}",
+        services_to_survey.len(),
+        existing.len()
     );
 
     let client = Arc::new(
@@ -338,9 +378,9 @@ async fn main() -> Result<()> {
     );
 
     let done_count = Arc::new(AtomicUsize::new(0));
-    let total = services.len();
+    let total = services_to_survey.len();
 
-    let entries: Vec<ApiSurveyEntry> = stream::iter(services.iter())
+    let new_entries: Vec<ApiSurveyEntry> = stream::iter(services_to_survey.into_iter())
         .map(|svc| {
             let client = client.clone();
             let list_id = svc.list_id.clone();
@@ -367,16 +407,22 @@ async fn main() -> Result<()> {
 
     let completed_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
 
-    let surveyed_count = entries.iter().filter(|e| e.fetch_error.is_none()).count();
-    let failed_count = entries.len() - surveyed_count;
+    // 결과 병합
+    for entry in new_entries {
+        existing.insert(entry.list_id.clone(), entry);
+    }
+    let all_entries: Vec<ApiSurveyEntry> = existing.into_values().collect();
+
+    let surveyed_count = all_entries.iter().filter(|e| e.fetch_error.is_none()).count();
+    let failed_count = all_entries.len() - surveyed_count;
 
     let report = SurveyReport {
         started_at,
         completed_at,
-        total_apis: entries.len(),
+        total_apis: all_entries.len(),
         surveyed_count,
         failed_count,
-        entries,
+        entries: all_entries,
     };
 
     // Step 3: 보고서 출력
@@ -693,5 +739,49 @@ mod tests {
         let decoded: SurveyReport = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.total_apis, 12000);
         assert_eq!(decoded.surveyed_count, 11900);
+    }
+
+    #[test]
+    fn test_load_existing_survey_empty() {
+        let result = load_existing_survey("/nonexistent/path.json");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_load_existing_survey_valid() {
+        let report = SurveyReport {
+            started_at: "2026-04-02T00:00:00".into(),
+            completed_at: "2026-04-02T01:00:00".into(),
+            total_apis: 1,
+            surveyed_count: 1,
+            failed_count: 0,
+            entries: vec![ApiSurveyEntry {
+                list_id: "12345".into(),
+                title: "Test".into(),
+                endpoint_url: "".into(),
+                http_status: Some(200),
+                fetch_error: None,
+                has_swagger_json: true,
+                has_swagger_url: false,
+                swagger_url_value: None,
+                swagger_ops_count: Some(1),
+                swagger_error: None,
+                has_html_pk: false,
+                html_pk_value: None,
+                html_ops_count: 0,
+                endpoint_domain: "".into(),
+                current_classification: "Available".into(),
+                anomalies: vec![],
+            }],
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("survey.json");
+        let json = serde_json::to_string(&report).unwrap();
+        std::fs::write(&path, &json).unwrap();
+
+        let loaded = load_existing_survey(path.to_str().unwrap());
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded.contains_key("12345"));
     }
 }

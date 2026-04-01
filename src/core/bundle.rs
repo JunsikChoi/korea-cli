@@ -7,7 +7,7 @@
 use anyhow::Result;
 use once_cell::sync::Lazy;
 
-use crate::core::types::Bundle;
+use crate::core::types::{Bundle, CURRENT_SCHEMA_VERSION};
 
 /// Embedded bundle, compiled into binary via build.rs.
 static EMBEDDED_BUNDLE: &[u8] = include_bytes!("../../data/bundle.zstd");
@@ -16,12 +16,25 @@ static EMBEDDED_BUNDLE: &[u8] = include_bytes!("../../data/bundle.zstd");
 pub static BUNDLE: Lazy<Bundle> = Lazy::new(|| load_bundle().expect("Failed to load bundle"));
 
 /// Load bundle with override chain: local file > embedded.
+/// If the local override has an incompatible schema, falls back to the embedded bundle.
 pub fn load_bundle() -> Result<Bundle> {
     // 1. Local override
     if let Ok(path) = crate::config::paths::bundle_override_file() {
         if path.exists() {
             let bytes = std::fs::read(&path)?;
-            return decompress_and_deserialize(&bytes);
+            match decompress_and_deserialize(&bytes) {
+                Ok(bundle) if bundle.metadata.schema_version == CURRENT_SCHEMA_VERSION => {
+                    return Ok(bundle);
+                }
+                Ok(_) => {
+                    eprintln!("외부 번들의 스키마 버전이 다릅니다. 내장 번들을 사용합니다.");
+                    eprintln!("최신 번들을 받으려면: korea-cli update");
+                }
+                Err(_) => {
+                    eprintln!("외부 번들이 현재 버전과 호환되지 않습니다. 내장 번들을 사용합니다.");
+                    eprintln!("최신 번들을 받으려면: korea-cli update");
+                }
+            }
         }
     }
     // 2. Embedded
@@ -54,6 +67,7 @@ mod tests {
         Bundle {
             metadata: BundleMetadata {
                 version: "test".into(),
+                schema_version: crate::core::types::CURRENT_SCHEMA_VERSION,
                 api_count: 1,
                 spec_count: 0,
                 checksum: "abc".into(),
@@ -66,6 +80,8 @@ mod tests {
                 org_name: "TestOrg".into(),
                 category: "TestCat".into(),
                 request_count: 42,
+                endpoint_url: "https://apis.data.go.kr/test".into(),
+                spec_status: crate::core::types::SpecStatus::Available,
             }],
             specs: HashMap::new(),
         }
@@ -92,5 +108,16 @@ mod tests {
         // Embedded bundle is either placeholder (dev) or real (with data/bundle.zstd)
         let bundle = load_bundle().unwrap();
         assert!(!bundle.metadata.version.is_empty());
+        assert_eq!(bundle.metadata.schema_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_schema_version_mismatch_detected() {
+        let mut bundle = make_test_bundle();
+        bundle.metadata.schema_version = 999;
+        let compressed = serialize_and_compress(&bundle, 3).unwrap();
+        let decoded = decompress_and_deserialize(&compressed).unwrap();
+        // Deserializes fine, but schema_version differs
+        assert_ne!(decoded.metadata.schema_version, CURRENT_SCHEMA_VERSION);
     }
 }

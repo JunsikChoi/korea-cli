@@ -52,24 +52,44 @@ async fn handle_get_spec(args: serde_json::Value) -> anyhow::Result<serde_json::
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("missing 'list_id' parameter"))?;
 
-    let spec = BUNDLE
-        .specs
-        .get(list_id)
-        .ok_or_else(|| anyhow::anyhow!("API spec not found: {list_id}"))?;
-
-    let has_key = AppConfig::load()?.resolve_api_key().is_some();
-    let mut output = serde_json::to_value(spec)?;
-    if let Some(obj) = output.as_object_mut() {
-        obj.insert("has_api_key".into(), json!(has_key));
-        if !has_key {
+    // Check for available spec
+    if let Some(spec) = BUNDLE.specs.get(list_id) {
+        let has_key = AppConfig::load()?.resolve_api_key().is_some();
+        let mut output = serde_json::to_value(spec)?;
+        if let Some(obj) = output.as_object_mut() {
+            obj.insert("success".into(), json!(true));
             obj.insert(
-                "key_guide".into(),
-                json!("이 API를 호출하려면 API 키가 필요합니다. DATA_GO_KR_API_KEY 환경변수를 설정하세요."),
+                "spec_status".into(),
+                serde_json::to_value(crate::core::types::SpecStatus::Available).unwrap(),
             );
+            obj.insert("has_api_key".into(), json!(has_key));
+            if !has_key {
+                obj.insert(
+                    "key_guide".into(),
+                    json!("이 API를 호출하려면 API 키가 필요합니다. DATA_GO_KR_API_KEY 환경변수를 설정하세요."),
+                );
+            }
         }
+        return Ok(output);
     }
 
-    Ok(output)
+    // No spec — look up catalog entry for status info
+    let entry = BUNDLE.catalog.iter().find(|e| e.list_id == list_id);
+    match entry {
+        Some(entry) => Ok(json!({
+            "success": false,
+            "list_id": list_id,
+            "spec_status": entry.spec_status,
+            "endpoint_url": entry.endpoint_url,
+            "message": entry.spec_status.user_message(),
+            "data_go_kr_url": format!("https://www.data.go.kr/data/{list_id}/openapi.do"),
+        })),
+        None => Ok(json!({
+            "success": false,
+            "error": "NOT_FOUND",
+            "message": format!("API를 찾을 수 없습니다: {list_id}"),
+        })),
+    }
 }
 
 async fn handle_call(args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
@@ -81,6 +101,26 @@ async fn handle_call(args: serde_json::Value) -> anyhow::Result<serde_json::Valu
         .get("operation")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("missing 'operation' parameter"))?;
+
+    // Check spec availability before attempting call
+    if !BUNDLE.specs.contains_key(list_id) {
+        let entry = BUNDLE.catalog.iter().find(|e| e.list_id == list_id);
+        return match entry {
+            Some(entry) => Ok(json!({
+                "success": false,
+                "list_id": list_id,
+                "spec_status": entry.spec_status,
+                "message": entry.spec_status.user_message(),
+                "endpoint_url": entry.endpoint_url,
+                "data_go_kr_url": format!("https://www.data.go.kr/data/{list_id}/openapi.do"),
+            })),
+            None => Ok(json!({
+                "success": false,
+                "error": "NOT_FOUND",
+                "message": format!("API를 찾을 수 없습니다: {list_id}"),
+            })),
+        };
+    }
 
     let cfg = AppConfig::load()?;
     let api_key = match cfg.resolve_api_key() {
@@ -94,11 +134,7 @@ async fn handle_call(args: serde_json::Value) -> anyhow::Result<serde_json::Valu
         }
     };
 
-    let spec = BUNDLE
-        .specs
-        .get(list_id)
-        .ok_or_else(|| anyhow::anyhow!("API spec not found: {list_id}"))?;
-
+    let spec = BUNDLE.specs.get(list_id).unwrap();
     let params: Vec<(String, String)> = args
         .get("params")
         .and_then(|v| v.as_object())

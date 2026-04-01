@@ -3,7 +3,16 @@
 //!
 //! Usage: cargo run --bin survey -- --api-key YOUR_KEY [--output data/survey.json] [--concurrency 5]
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+
+use anyhow::{Context, Result};
+use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
+
+use korea_cli::core::catalog::fetch_all_services;
 
 /// 개별 API 조사 결과
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -295,8 +304,233 @@ async fn survey_single_api(
     }
 }
 
-fn main() {
-    // TODO: Task 5에서 구현
+#[derive(Clone)]
+struct SurveyConfig {
+    api_key: String,
+    output: String,
+    concurrency: usize,
+    delay_ms: u64,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let config = parse_args()?;
+    let start = Instant::now();
+    let started_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+
+    // Step 1: 카탈로그 수집
+    eprintln!("=== Step 1/3: 카탈로그 수집 ===");
+    let services = fetch_all_services(&config.api_key).await?;
+    eprintln!("  {} 서비스 수집 완료", services.len());
+
+    // Step 2: 전수조사
+    eprintln!(
+        "\n=== Step 2/3: openapi.do 전수조사 (동시 {}건) ===",
+        config.concurrency
+    );
+
+    let client = Arc::new(
+        reqwest::Client::builder()
+            .user_agent("korea-cli-survey/0.1.0")
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .context("HTTP 클라이언트 생성 실패")?,
+    );
+
+    let done_count = Arc::new(AtomicUsize::new(0));
+    let total = services.len();
+
+    let entries: Vec<ApiSurveyEntry> = stream::iter(services.iter())
+        .map(|svc| {
+            let client = client.clone();
+            let list_id = svc.list_id.clone();
+            let title = svc.title.clone();
+            let endpoint_url = svc.endpoint_url.clone();
+            let delay_ms = config.delay_ms;
+            let done = done_count.clone();
+
+            async move {
+                let entry = survey_single_api(&client, &list_id, &title, &endpoint_url).await;
+
+                let count = done.fetch_add(1, Ordering::Relaxed) + 1;
+                if count % 500 == 0 {
+                    eprintln!("  진행: {count}/{total}");
+                }
+
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                entry
+            }
+        })
+        .buffer_unordered(config.concurrency)
+        .collect()
+        .await;
+
+    let completed_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+
+    let surveyed_count = entries.iter().filter(|e| e.fetch_error.is_none()).count();
+    let failed_count = entries.len() - surveyed_count;
+
+    let report = SurveyReport {
+        started_at,
+        completed_at,
+        total_apis: entries.len(),
+        surveyed_count,
+        failed_count,
+        entries,
+    };
+
+    // Step 3: 보고서 출력
+    eprintln!("\n=== Step 3/3: 보고서 생성 ===");
+    print_summary(&report);
+
+    // JSON 저장
+    let json = serde_json::to_string_pretty(&report)?;
+    std::fs::create_dir_all(
+        std::path::Path::new(&config.output)
+            .parent()
+            .unwrap_or(std::path::Path::new(".")),
+    )?;
+    std::fs::write(&config.output, &json)?;
+
+    let elapsed = start.elapsed();
+    eprintln!("\n=== 완료 ===");
+    eprintln!("  소요: {:.1}분", elapsed.as_secs_f64() / 60.0);
+    eprintln!("  결과: {}", config.output);
+
+    Ok(())
+}
+
+fn print_summary(report: &SurveyReport) {
+    eprintln!("\n--- 전수조사 요약 ---");
+    eprintln!("전체: {}", report.total_apis);
+    eprintln!(
+        "조사 성공: {} / 실패: {}",
+        report.surveyed_count, report.failed_count
+    );
+
+    // Swagger 분포
+    let swagger_full = report
+        .entries
+        .iter()
+        .filter(|e| e.swagger_ops_count.unwrap_or(0) > 0)
+        .count();
+    let swagger_skeleton = report
+        .entries
+        .iter()
+        .filter(|e| e.has_swagger_json && e.swagger_ops_count == Some(0))
+        .count();
+    let swagger_url_only = report
+        .entries
+        .iter()
+        .filter(|e| !e.has_swagger_json && e.has_swagger_url)
+        .count();
+    let no_swagger = report
+        .entries
+        .iter()
+        .filter(|e| !e.has_swagger_json && !e.has_swagger_url)
+        .count();
+
+    eprintln!("\n[Swagger 분포]");
+    eprintln!("  inline JSON (ops > 0): {swagger_full}");
+    eprintln!("  inline JSON (ops = 0, skeleton): {swagger_skeleton}");
+    eprintln!("  swaggerUrl만: {swagger_url_only}");
+    eprintln!("  Swagger 없음: {no_swagger}");
+
+    // HTML 스펙 분포
+    let html_available = report
+        .entries
+        .iter()
+        .filter(|e| e.has_html_pk && e.html_ops_count > 0)
+        .count();
+    let html_pk_no_ops = report
+        .entries
+        .iter()
+        .filter(|e| e.has_html_pk && e.html_ops_count == 0)
+        .count();
+    let no_html = report.entries.iter().filter(|e| !e.has_html_pk).count();
+
+    eprintln!("\n[HTML 스펙 분포]");
+    eprintln!("  pk + operations: {html_available}");
+    eprintln!("  pk만 (operations 없음): {html_pk_no_ops}");
+    eprintln!("  pk 없음: {no_html}");
+
+    // 교차 분석
+    let html_fallback_candidates = report
+        .entries
+        .iter()
+        .filter(|e| e.swagger_ops_count.unwrap_or(0) == 0 && e.has_html_pk && e.html_ops_count > 0)
+        .count();
+    eprintln!("\n[교차 분석]");
+    eprintln!("  Swagger 없음 + HTML 폴백 가능: {html_fallback_candidates}");
+
+    // Endpoint 도메인 분포
+    let mut domain_counts: HashMap<String, usize> = HashMap::new();
+    for entry in &report.entries {
+        *domain_counts.entry(entry.endpoint_domain.clone()).or_default() += 1;
+    }
+    let mut domains: Vec<_> = domain_counts.into_iter().collect();
+    domains.sort_by(|a, b| b.1.cmp(&a.1));
+
+    eprintln!("\n[Endpoint 도메인 Top 20]");
+    for (domain, count) in domains.iter().take(20) {
+        eprintln!("  {count:>5}  {domain}");
+    }
+
+    // SpecStatus 분류 분포
+    let mut status_counts: HashMap<String, usize> = HashMap::new();
+    for entry in &report.entries {
+        *status_counts.entry(entry.current_classification.clone()).or_default() += 1;
+    }
+    eprintln!("\n[현재 SpecStatus 분류]");
+    for (status, count) in &status_counts {
+        eprintln!("  {count:>5}  {status}");
+    }
+
+    // Anomaly 분포
+    let mut anomaly_counts: HashMap<String, usize> = HashMap::new();
+    for entry in &report.entries {
+        for anomaly in &entry.anomalies {
+            *anomaly_counts.entry(anomaly.clone()).or_default() += 1;
+        }
+    }
+    if !anomaly_counts.is_empty() {
+        let mut anomalies: Vec<_> = anomaly_counts.into_iter().collect();
+        anomalies.sort_by(|a, b| b.1.cmp(&a.1));
+        eprintln!("\n[Anomaly 분포]");
+        for (anomaly, count) in &anomalies {
+            eprintln!("  {count:>5}  {anomaly}");
+        }
+    }
+}
+
+fn parse_args() -> Result<SurveyConfig> {
+    let args: Vec<String> = std::env::args().collect();
+
+    let api_key = get_arg(&args, "--api-key")
+        .or_else(|| std::env::var("DATA_GO_KR_API_KEY").ok())
+        .ok_or_else(|| anyhow::anyhow!("--api-key 또는 DATA_GO_KR_API_KEY 환경변수 필요"))?;
+
+    let output = get_arg(&args, "--output").unwrap_or_else(|| "data/survey.json".into());
+    let concurrency: usize = get_arg(&args, "--concurrency")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5);
+    let delay_ms: u64 = get_arg(&args, "--delay")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(100);
+
+    Ok(SurveyConfig {
+        api_key,
+        output,
+        concurrency,
+        delay_ms,
+    })
+}
+
+fn get_arg(args: &[String], flag: &str) -> Option<String> {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
 }
 
 #[cfg(test)]

@@ -38,6 +38,10 @@ zstd = "0.13"
 name = "build-bundle"
 path = "src/bin/build_bundle.rs"
 
+[[bin]]
+name = "survey"
+path = "src/bin/survey.rs"
+
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"

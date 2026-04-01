@@ -68,6 +68,8 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 - [x] html_parser.rs 셀렉터 버그 수정 (`name=` → `id=` 우선)
 - [x] HTML 전수조사 바이너리 (`html-survey`) 구현 + 실행
 - [x] 전수조사 결과 분석: 2,522개 신규 추출 가능 확인
+- [x] openapi.do 페이지 HTML 크롤러 (`crawl-pages`) — 수집/분석 분리 전략
+- [ ] 로컬 HTML 분석 도구 구현 (발견 기반 — 모든 유의미한 신호 추출)
 - [ ] build_bundle.rs에 HTML 폴백 경로 추가 (Swagger 실패 → pk+AJAX → 스펙 생성)
   - openapi.do에서 pk + select 옵션 추출
   - 각 operation마다 `selectApiDetailFunction.do` AJAX POST (Referer 필수)

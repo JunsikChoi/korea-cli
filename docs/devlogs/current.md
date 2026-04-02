@@ -428,5 +428,59 @@ Size:    2.0 GB (페이지당 평균 ~168KB)
 
 ### 다음 작업
 
-- 로컬 HTML 분석 도구 구현 (발견 기반 — 모든 유의미한 신호 추출)
-- 분석 결과 기반 build_bundle HTML 폴백 재설계
+- ~~로컬 HTML 분석 도구 구현 (발견 기반 — 모든 유의미한 신호 추출)~~ ✓
+
+---
+
+## 2026-04-02: HTML 패턴 발견 도구 구현 + 실행
+
+### 배경
+
+이전 전수조사들이 확증 편향으로 실패한 교훈을 반영하여, "가정 없이" 모든 구조적 신호를 추출하는 2단계 파이프라인을 구현. 크롤링된 12,108개 HTML 파일을 입력으로 사용.
+
+### 완료
+
+- `src/bin/analyze_pages.rs` — 1단계: HTML 구조 신호 추출기
+  - DOM 추출 (태그 카운트, id, name, class, data-*, th, select/option)
+  - JS 추출 (변수 선언 regex, AJAX URL, JSON-LD, script type)
+  - 메타 추출 (meta name/property/http-equiv, link rel)
+  - 6개 단위 테스트 + 실제 HTML 통합 테스트
+- `src/bin/summarize_signals.rs` — 2단계: 빈도 분석 + 클러스터링
+  - 요소별 빈도 집계, 변별 신호 추출 (universal 제외)
+  - js_var_types 기반 클러스터링 (95% 미만만 key signal로 사용)
+  - 3개 단위 테스트
+- 전체 파이프라인 실행 완료
+- clippy/fmt 클린, 9개 테스트 전체 통과
+
+### 실행 결과
+
+**1단계 (analyze-pages)**: 12,108개 분석, 35초 소요 → `data/page_raw_signals.json`
+**2단계 (summarize-signals)**: 빈도 분석 + 클러스터링 → `data/signal_summary.json` (93KB)
+
+### 핵심 발견: 8개 클러스터
+
+| 클러스터 | 파일 수 | 비율 | 핵심 신호 |
+|----------|---------|------|-----------|
+| **Swagger+Slider** | 4,010 | 33.1% | `swaggerJson:object` + slide UI |
+| **No-Swagger** | 3,399 | 28.1% | `swaggerJson:empty`, `html:other` |
+| **Gateway API** | 3,165 | 26.1% | `swaggerJson:empty` + `apiObj`/`paramList` |
+| **Swagger-Other** | 1,397 | 11.5% | `swaggerJson:object`, `html:other` |
+| **Undefined** | 75 | 0.6% | `swaggerJson:undefined` |
+| **SwaggerURL** | 32 | 0.3% | `swaggerUrl:string` (Infuser API) |
+| **Gateway-Var** | 22 | 0.2% | `apiObj` 패턴 변형 |
+| **Error** | 8 | 0.1% | 에러 페이지 (JS 변수 없음) |
+
+**Swagger 3변형**: `swaggerJson` = object(5,407), empty(6,618), undefined(75)
+**555개 변별 신호**: universal(12,100+) 요소 제외 후 나머지
+
+### 통계 요약
+
+- ids: 121종류, classes: 213종류, js_var_types: 79종류
+- meta_keys: 11종류 (거의 전부 공통)
+- 76개 id가 12,100+ 파일에 출현 (공통 템플릿)
+
+### 다음 작업
+
+- signal_summary.json을 분석하여 패턴 그룹 확정
+- 각 그룹과 현재 SpecStatus 매핑 비교
+- build_bundle.rs 분류 로직 개선

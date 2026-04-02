@@ -74,6 +74,100 @@ fn truncate(s: &str, max_len: usize) -> String {
     }
 }
 
+/// 기관별 markdown 페이지 생성. title/description에 escape_md_table 적용 [B1].
+fn render_org_page(
+    org_name: &str,
+    entries: &[&CatalogEntry],
+    specs: &std::collections::HashMap<String, korea_cli::core::types::ApiSpec>,
+) -> String {
+    let available: Vec<_> = entries
+        .iter()
+        .copied()
+        .filter(|e| e.spec_status == SpecStatus::Available)
+        .collect();
+    let external: Vec<_> = entries
+        .iter()
+        .copied()
+        .filter(|e| e.spec_status == SpecStatus::External)
+        .collect();
+    let other: Vec<_> = entries
+        .iter()
+        .copied()
+        .filter(|e| !matches!(e.spec_status, SpecStatus::Available | SpecStatus::External))
+        .collect();
+
+    let mut md = String::new();
+    md.push_str(&format!("# {}\n\n", org_name));
+    md.push_str(&format!(
+        "> {} API | 호출 가능 {} | 외부 링크 {}\n\n",
+        entries.len(),
+        available.len(),
+        external.len()
+    ));
+
+    // Available
+    if !available.is_empty() {
+        md.push_str(&format!(
+            "## 호출 가능 (Available) — {}개\n\n",
+            available.len()
+        ));
+        md.push_str("| API | ID | 설명 | 오퍼레이션 |\n");
+        md.push_str("|-----|-----|------|----------|\n");
+        for e in &available {
+            let ops = specs.get(&e.list_id).map(|s| s.operations.len()).unwrap_or(0);
+            let title = escape_md_table(&e.title);
+            let desc = escape_md_table(&truncate(&e.description, 60));
+            md.push_str(&format!(
+                "| {} | `{}` | {} | {} |\n",
+                title, e.list_id, desc, ops
+            ));
+        }
+        md.push('\n');
+    }
+
+    // External
+    if !external.is_empty() {
+        md.push_str(&format!(
+            "## 외부 링크 (External) — {}개\n\n",
+            external.len()
+        ));
+        md.push_str("| API | ID | 설명 | 링크 |\n");
+        md.push_str("|-----|-----|------|------|\n");
+        for e in &external {
+            let title = escape_md_table(&e.title);
+            let desc = escape_md_table(&truncate(&e.description, 60));
+            let url = &e.endpoint_url;
+            let link = if url.starts_with("http") {
+                format!("[링크]({})", url)
+            } else {
+                "—".into()
+            };
+            md.push_str(&format!(
+                "| {} | `{}` | {} | {} |\n",
+                title, e.list_id, desc, link
+            ));
+        }
+        md.push('\n');
+    }
+
+    // Other (Skeleton, CatalogOnly 등 — 소수)
+    if !other.is_empty() {
+        md.push_str(&format!("## 기타 — {}개\n\n", other.len()));
+        md.push_str("| API | ID | 상태 |\n");
+        md.push_str("|-----|-----|------|\n");
+        for e in &other {
+            let title = escape_md_table(&e.title);
+            md.push_str(&format!(
+                "| {} | `{}` | {:?} |\n",
+                title, e.list_id, e.spec_status
+            ));
+        }
+        md.push('\n');
+    }
+
+    md
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -207,5 +301,28 @@ mod tests {
         // request_count 내림차순: 날씨(1000) > 대기질(500)
         assert_eq!(kma[0].list_id, "100");
         assert_eq!(kma[1].list_id, "200");
+    }
+
+    #[test]
+    fn test_render_org_page() {
+        let bundle = make_test_bundle();
+        let groups = group_by_org(&bundle);
+        let content = render_org_page("기상청", &groups["기상청"], &bundle.specs);
+        assert!(content.contains("# 기상청"));
+        assert!(content.contains("날씨 API"));
+        assert!(content.contains("대기질 API"));
+        assert!(content.contains("호출 가능")); // Available 섹션
+        assert!(content.contains("외부 링크")); // External 섹션
+        assert!(content.contains("apihub.kma.go.kr")); // External URL 표시
+    }
+
+    #[test]
+    fn test_render_org_page_available_only() {
+        let bundle = make_test_bundle();
+        let groups = group_by_org(&bundle);
+        let content = render_org_page("국토교통부", &groups["국토교통부"], &bundle.specs);
+        assert!(content.contains("# 국토교통부"));
+        assert!(content.contains("부동산 API"));
+        assert!(!content.contains("## 외부 링크")); // External 없으면 섹션 헤더 미표시
     }
 }

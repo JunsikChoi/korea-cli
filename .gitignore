@@ -9,3 +9,5 @@ data/survey.json
 data/html-survey.json
 data/pages/
 data/crawl_failures.json
+data/page_raw_signals.json
+data/signal_summary.json

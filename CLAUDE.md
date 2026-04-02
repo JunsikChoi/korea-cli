@@ -51,6 +51,20 @@ test: 테스트 추가/수정
 chore: 빌드, 설정 변경
 ```
 
+## data/ 디렉토리 — 생성 파일 주의
+
+`data/` 하위에는 바이너리 실행으로 생성되는 대용량 파일이 있다 (.gitignore 대상):
+
+- `data/pages/` — 12K+ 크롤링 HTML (2GB)
+- `data/page_raw_signals.json` — analyze-pages 출력 (250MB)
+- `data/signal_summary.json` — summarize-signals 출력
+- `data/survey.json`, `data/html-survey.json` 등
+
+**worktree 정리 전 필수 확인**: worktree에서 생성한 `data/` 파일은 git에 추적되지 않으므로, `git worktree remove` 시 함께 삭제된다. worktree 정리 전에 반드시:
+1. 메인 worktree에 없는 생성 파일이 있는지 확인 (`ls data/*.json`)
+2. 있으면 메인 worktree로 복사 (`cp`)하거나 메인에서 재실행
+3. symlink로 연결한 파일(`data/pages/`)은 원본이 메인에 있으므로 안전
+
 ## 빌드 & 테스트
 
 ```bash

@@ -248,6 +248,7 @@ fn render_readme(
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    // 번들 로드
     let bytes = std::fs::read(&args.bundle)?;
     let bundle = korea_cli::core::bundle::decompress_and_deserialize(&bytes)?;
 
@@ -260,8 +261,34 @@ fn main() -> Result<()> {
         );
     }
 
+    eprintln!(
+        "{} API 로드, {} specs",
+        bundle.catalog.len(),
+        bundle.specs.len()
+    );
+
+    // 그룹핑
     let groups = group_by_org(&bundle);
-    eprintln!("{} 기관, {} API", groups.len(), bundle.catalog.len());
+    eprintln!("{} 기관", groups.len());
+
+    // 출력 디렉토리 생성
+    let by_org_dir = args.output.join("by-org");
+    std::fs::create_dir_all(&by_org_dir)?;
+
+    // README.md 생성 [W2]
+    let readme = render_readme(&groups, &bundle.specs);
+    std::fs::write(args.output.join("README.md"), &readme)?;
+    eprintln!("README.md 생성");
+
+    // 기관별 파일 생성 [B3]
+    for (org, entries) in &groups {
+        let content = render_org_page(org, entries, &bundle.specs);
+        let safe_name = sanitize_filename(org);
+        let path = by_org_dir.join(format!("{}.md", safe_name));
+        std::fs::write(&path, &content)?;
+    }
+    eprintln!("{} 기관별 파일 생성 완료", groups.len());
+    eprintln!("출력: {:?}", args.output);
 
     Ok(())
 }

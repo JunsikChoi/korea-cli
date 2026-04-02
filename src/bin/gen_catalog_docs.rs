@@ -75,15 +75,6 @@ fn escape_md_table(s: &str) -> String {
     s.replace('|', r"\|").replace('\r', "").replace('\n', " ")
 }
 
-/// 문자열을 max_len 이하로 자르고 '…' 추가
-fn truncate(s: &str, max_len: usize) -> String {
-    if max_len == 0 || s.chars().count() <= max_len {
-        return s.to_string();
-    }
-    let truncated: String = s.chars().take(max_len - 1).collect();
-    format!("{}…", truncated)
-}
-
 /// 기관별 markdown 페이지 생성. title/description에 escape_md_table 적용 [B1].
 fn render_org_page(
     org_name: &str,
@@ -127,10 +118,11 @@ fn render_org_page(
         for e in &available {
             let ops = specs.get(&e.list_id).map(|s| s.operations.len()).unwrap_or(0);
             let title = escape_md_table(&e.title);
-            let desc = escape_md_table(&truncate(&e.description, 60));
+            let desc = escape_md_table(&e.description);
+            let id_link = format!("[{}](https://www.data.go.kr/data/{}/openapi.do)", e.list_id, e.list_id);
             md.push_str(&format!(
-                "| {} | `{}` | {} | {} |\n",
-                title, e.list_id, desc, ops
+                "| {} | {} | {} | {} |\n",
+                title, id_link, desc, ops
             ));
         }
         md.push('\n');
@@ -146,17 +138,18 @@ fn render_org_page(
         md.push_str("|-----|-----|------|------|\n");
         for e in &external {
             let title = escape_md_table(&e.title);
-            let desc = escape_md_table(&truncate(&e.description, 60));
+            let desc = escape_md_table(&e.description);
+            let id_link = format!("[{}](https://www.data.go.kr/data/{}/openapi.do)", e.list_id, e.list_id);
             let url = &e.endpoint_url;
-            let link = if url.starts_with("http") {
+            let link = if url.trim().starts_with("http") {
                 let safe_url = url.replace('>', "%3E"); // [eval B-2]
                 format!("[링크](<{}>)", safe_url)
             } else {
                 "—".into()
             };
             md.push_str(&format!(
-                "| {} | `{}` | {} | {} |\n",
-                title, e.list_id, desc, link
+                "| {} | {} | {} | {} |\n",
+                title, id_link, desc, link
             ));
         }
         md.push('\n');
@@ -169,9 +162,10 @@ fn render_org_page(
         md.push_str("|-----|-----|------|\n");
         for e in &other {
             let title = escape_md_table(&e.title);
+            let id_link = format!("[{}](https://www.data.go.kr/data/{}/openapi.do)", e.list_id, e.list_id);
             md.push_str(&format!(
-                "| {} | `{}` | {} |\n",
-                title, e.list_id, e.spec_status.user_message()
+                "| {} | {} | {} |\n",
+                title, id_link, e.spec_status.user_message()
             ));
         }
         md.push('\n');
@@ -411,14 +405,6 @@ mod tests {
         assert_eq!(escape_md_table("GET | POST"), r"GET \| POST");
         assert_eq!(escape_md_table("줄바꿈\n포함"), "줄바꿈 포함");
         assert_eq!(escape_md_table("CRLF\r\n포함"), "CRLF 포함");
-    }
-
-    #[test]
-    fn test_truncate() {
-        assert_eq!(truncate("hello", 0), "hello");
-        assert_eq!(truncate("hello", 10), "hello");
-        assert_eq!(truncate("hello world", 6), "hello…");
-        assert_eq!(truncate("한글테스트", 3), "한글…");
     }
 
     #[test]

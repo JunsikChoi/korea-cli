@@ -54,6 +54,7 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 - [x] 번들 로드/조회 로직 구현 (기존 실시간 스크래핑 대체)
 - [x] `korea-cli update` 번들 다운로드 뼈대
 - [x] 초기 번들 생성 (수동 1회 수집) — 12,080 APIs + 5,363 specs, 2.77 MB
+- [x] Gateway AJAX 번들 리빌드 — 12,119 APIs + 7,160 specs, 4.2 MB (Available 59.1%)
 - [x] Spec 미수집 API 분석 → 유효 spec ~3,960 / skeleton ~1,400 / 미생성 ~1,200 / 외부 ~5,500
 
 ### 1. Spec 품질 개선 ✅
@@ -75,7 +76,7 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
   - 각 operation마다 `selectApiDetailFunction.do` AJAX POST (cookie-isolated client)
   - `parse_operation_detail` → `build_api_spec`으로 스펙 구성
 - [x] html_parser.rs 보강 — h4 기반 응답 필드 파싱 + 요청주소 미발견 시 서비스URL 폴백
-- [ ] 번들 리빌드 + 커버리지 검증 (목표: 6,475개 = 53.5%)
+- [x] 번들 리빌드 + 커버리지 검증 — Available 7,160개 (59.1%), 목표 53.5% 초과 달성
 - [ ] AJAX 부분 성공 662건 추가 파싱 (서비스URL 기반)
 
 ### 3. CI 수집 파이프라인

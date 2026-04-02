@@ -1,9 +1,9 @@
 # Gateway API 스펙 추출 구현 플랜
 
-## 구현 상태: ✅ Task 1-8 완료 (2026-04-03)
+## 구현 상태: ✅ Task 1-8 완료 + 번들 리빌드 검증 (2026-04-03)
 
 Task 1-8 구현 완료, 159 테스트 통과, /review + /eval 검증 통과.
-Task 9 (소규모 E2E 검증)는 미실행 — 번들 리빌드 시 함께 진행 예정.
+번들 리빌드 완료: Available 7,160 (59.1%), Gateway 3,125건 추출, 목표 초과 달성.
 
 **구현 차이점:**
 - `SpecResult::Spec`의 spec 필드: `ApiSpec` → `Box<ApiSpec>` (clippy large_enum_variant 해소)

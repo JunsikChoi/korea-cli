@@ -523,7 +523,64 @@ HTML 패턴 발견에서 확인된 3개 패턴(Swagger inline, Swagger URL, Gate
 
 ### 다음 작업
 
+- ~~번들 리빌드 + 커버리지 검증~~ ✓
 - 소규모 E2E 검증 (실제 data.go.kr에서 Gateway API 3-5개 테스트)
-- 번들 리빌드 + 커버리지 검증 (Available 수 변화 확인)
 - 쿠키 격리 필요 여부 검증 (불필요하면 공유 client로 전환)
 - ResponseFormat JSON 감지 구현
+
+---
+
+## 2026-04-03: 번들 리빌드 — Gateway AJAX 통합 결과
+
+### 배경
+
+Gateway API 스펙 추출 파이프라인(분류 우선 + AJAX 추출) 구현 완료 후 첫 번째 전체 번들 리빌드. 기존 Swagger 전용 번들 대비 커버리지 변화를 검증.
+
+### 실행
+
+```bash
+cargo run --bin build-bundle -- \
+  --api-key $DATA_GO_KR_API_KEY \
+  --concurrency 5 --delay 100 \
+  --ajax-concurrency 10 --ajax-delay 50 \
+  --output data/bundle-gateway.zstd
+```
+
+소요: 39.6분, 12,119 서비스 대상
+
+### 결과
+
+| 분류 | 기존 번들 | 새 번들 | 변화 |
+|------|----------|---------|------|
+| **Available** | ~4,042 | **7,160** | **+77%** |
+| **External** | ~4,652 | **4,942** | +290 |
+| **Skeleton** | ~1,404 | **8** | -1,396 (대부분 재분류) |
+| **CatalogOnly** | ~2,101 | **9** | -2,092 (대부분 재분류) |
+| **HtmlOnly** | 2 | **0** | 소멸 |
+| **총 API** | ~12,080 | **12,119** | +39 (카탈로그 증가) |
+
+번들 크기: 2.9 MB → 4.2 MB (+45%)
+
+### 핵심 수치
+
+- **Gateway AJAX 추출 성공: 3,125건** — 목표 ~2,500-3,000 초과 달성
+- **LINK API (PRDE04) External 분류: ~4,942건** — 정상 동작
+- **Skeleton/CatalogOnly 급감**: 분류 우선 파이프라인이 이전 분류 로직보다 정밀. tyDetailCode 기반 분류가 endpoint_url 기반보다 정확
+- **FAIL 4,902건**: pk 미발견(PARSE_ERR), 페이지 요청 실패(SKIP), operation 미등록 등. 기술적으로 추출 불가능한 API들
+
+### 커버리지 해석
+
+| 구분 | 수 | 비율 |
+|------|---:|-----:|
+| 호출 가능 (Available) | 7,160 | 59.1% |
+| 외부 포탈 (External) | 4,942 | 40.8% |
+| 미분류 (Skeleton+CatalogOnly) | 17 | 0.1% |
+
+**호출 가능 API가 59.1%로 향상** — 이전 32.6%(Swagger only) → 53.5%(설계 목표) → 59.1%(실측). 설계 목표를 초과 달성한 이유는 AJAX 부분 성공 662건 중 상당수가 실제로도 성공했기 때문으로 추정.
+
+### 다음 작업
+
+- bundle-gateway.zstd를 기본 번들로 교체 (내장 번들 업데이트)
+- AJAX 부분 성공 케이스 추가 분석 (서비스URL 기반)
+- 쿠키 격리 필요 여부 검증
+- CI 수집 파이프라인 (GitHub Actions cron)

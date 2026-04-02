@@ -168,6 +168,83 @@ fn render_org_page(
     md
 }
 
+/// 기관별 통계 [W8]
+struct OrgStats {
+    org: String,
+    total: usize,
+    available: usize,
+    external: usize,
+    ops: usize,
+    total_requests: u64,
+}
+
+/// 요약 README.md 생성 (통계 + 기관별 목차)
+fn render_readme(
+    groups: &BTreeMap<String, Vec<&CatalogEntry>>,
+    specs: &std::collections::HashMap<String, korea_cli::core::types::ApiSpec>,
+) -> String {
+    let total_api: usize = groups.values().map(|v| v.len()).sum(); // [W2]
+    let total_available: usize = groups
+        .values()
+        .flat_map(|v| v.iter())
+        .filter(|e| e.spec_status == SpecStatus::Available)
+        .count();
+    let total_external: usize = groups
+        .values()
+        .flat_map(|v| v.iter())
+        .filter(|e| e.spec_status == SpecStatus::External)
+        .count();
+
+    let mut md = String::new();
+    md.push_str("# API 카탈로그\n\n");
+    md.push_str(&format!(
+        "> **{}개** 공공데이터 API | **{}개** 호출 가능 | **{}개** 외부 링크\n\n",
+        total_api, total_available, total_external
+    ));
+    md.push_str("이 문서는 [korea-cli](../../README.md) 번들에서 자동 생성되었습니다.\n\n");
+    md.push_str("- **호출 가능 (Available)**: `korea-cli call`로 직접 호출 가능한 API\n");
+    md.push_str("- **외부 링크 (External)**: 외부 포탈에서 제공, 링크로 안내\n\n");
+
+    // 기관별 통계 수집
+    let mut org_stats: Vec<OrgStats> = groups
+        .iter()
+        .map(|(org, entries)| OrgStats {
+            org: org.clone(),
+            total: entries.len(),
+            available: entries
+                .iter()
+                .filter(|e| e.spec_status == SpecStatus::Available)
+                .count(),
+            external: entries
+                .iter()
+                .filter(|e| e.spec_status == SpecStatus::External)
+                .count(),
+            ops: entries
+                .iter()
+                .filter_map(|e| specs.get(&e.list_id))
+                .map(|s| s.operations.len())
+                .sum(),
+            total_requests: entries.iter().map(|e| e.request_count as u64).sum(), // [W3]
+        })
+        .collect();
+    // request_count 내림차순, 동률 시 org_name으로 안정 정렬
+    org_stats.sort_by(|a, b| b.total_requests.cmp(&a.total_requests).then(a.org.cmp(&b.org)));
+
+    md.push_str("## 기관별 목록\n\n");
+    md.push_str("| 기관 | 전체 | 호출 가능 | 외부 링크 | 오퍼레이션 |\n");
+    md.push_str("|------|-----:|---------:|---------:|-----------:|\n");
+    for s in &org_stats {
+        let safe_org = sanitize_filename(&s.org); // [B3]
+        md.push_str(&format!(
+            "| [{}](by-org/{}.md) | {} | {} | {} | {} |\n",
+            s.org, safe_org, s.total, s.available, s.external, s.ops
+        ));
+    }
+    md.push('\n');
+
+    md
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -324,5 +401,23 @@ mod tests {
         assert!(content.contains("# 국토교통부"));
         assert!(content.contains("부동산 API"));
         assert!(!content.contains("## 외부 링크")); // External 없으면 섹션 헤더 미표시
+    }
+
+    #[test]
+    fn test_render_readme() {
+        let bundle = make_test_bundle();
+        let groups = group_by_org(&bundle);
+        let content = render_readme(&groups, &bundle.specs);
+        assert!(content.contains("# API 카탈로그"));
+        assert!(content.contains("3")); // 총 API 수
+        assert!(content.contains("기상청"));
+        assert!(content.contains("국토교통부"));
+        // 기관 테이블이 request_count 합 내림차순인지 확인
+        let molit_pos = content.find("국토교통부").unwrap();
+        let kma_pos = content.find("기상청").unwrap();
+        // 국토교통부(2000) > 기상청(1500) → 국토교통부가 먼저
+        assert!(molit_pos < kma_pos);
+        // sanitize_filename이 링크에 적용되는지 [B3]
+        assert!(content.contains("by-org/국토교통부.md"));
     }
 }

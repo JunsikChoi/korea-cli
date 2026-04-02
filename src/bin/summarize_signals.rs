@@ -230,11 +230,14 @@ fn build_clusters(
     freq: &ElementFrequencies,
     all_signals: &BTreeMap<String, PageSignals>,
 ) -> Vec<Cluster> {
-    // 1. key signals 선정: js_var_types에서 count > 10, count 내림차순 상위 20개
+    // 1. key signals 선정: js_var_types에서 변별력 있는 것만 선택
+    //    count > 10 이면서 전체의 95% 미만 (near-universal 제외)
+    let total = all_signals.len();
+    let upper_threshold = (total as f64 * 0.95) as usize;
     let mut jvt_entries: Vec<(&String, &usize)> = freq
         .js_var_types
         .iter()
-        .filter(|(_, &count)| count > 10)
+        .filter(|(_, &count)| count > 10 && count < upper_threshold)
         .collect();
     jvt_entries.sort_by(|a, b| b.1.cmp(a.1));
     let key_signals: Vec<&str> = jvt_entries

@@ -584,3 +584,77 @@ cargo run --bin build-bundle -- \
 - AJAX 부분 성공 케이스 추가 분석 (서비스URL 기반)
 - 쿠키 격리 필요 여부 검증
 - CI 수집 파이프라인 (GitHub Actions cron)
+
+---
+
+## 2026-04-03: API 카탈로그 문서 생성기 구현
+
+### 완료
+
+- `src/bin/gen_catalog_docs.rs` 바이너리 구현 (7 commits, TDD 기반)
+  - 번들(.zstd) 로드 → CatalogEntry를 org_name으로 그룹핑
+  - `docs/api-catalog/README.md` (통계 요약 + 기관별 목차, request_count 내림차순)
+  - `docs/api-catalog/by-org/{org}.md` (기관별 Available/External/기타 섹션)
+  - ID를 `data.go.kr/data/{list_id}/openapi.do` 클릭 링크로 생성
+  - eval 3 rounds (architect-reviewer + code-reviewer + Codex 교차검증) 통과
+- 406개 기관, 12,119 API 문서 생성
+- `.gitattributes` linguist-generated 설정 (PR diff 자동 접기)
+- 프로젝트 README에 카탈로그 링크 추가
+
+### 방어 로직 (eval 반영)
+
+- `sanitize_filename`: 기관명 → 파일시스템 안전 이름 변환
+- `org_safe_filename`: sanitize 결과 빈 문자열 시 `_org_{list_id}` fallback
+- 파일명 충돌 감지 (`seen_filenames` HashMap, 충돌 시 bail)
+- `escape_md_table`: `|`, `\r`, `\n` 이스케이프
+- External URL `>` → `%3E` percent-encode + angle bracket 링크
+
+### 발견된 이슈: External API의 endpoint_url 누락
+
+카탈로그 문서 생성 중 **External API 4,942건의 endpoint_url이 전부 빈 값**(`" "` 또는 `""`)인 것을 확인. External 섹션의 "링크" 컬럼이 전부 `—`으로 표시되는 원인.
+
+**데이터 흐름 추적:**
+
+```
+메타 API (api.odcloud.kr)
+  → endpoint_url: " " (빈 값으로 반환)
+  → build_bundle.rs: svc.endpoint_url을 CatalogEntry에 그대로 복사 (108행)
+  → SpecStatus::classify: is_link_api=true → External 판정
+  → 번들: endpoint_url=" ", spec_status=External
+  → CLI spec 조회: endpoint_url=" ", message="외부 포탈에서 제공하는 API입니다"
+  → gen-catalog-docs: url.trim().starts_with("http") → false → "—" 표시
+```
+
+**근본 원인**: 메타 API가 External(LINK) API의 실제 외부 포탈 URL을 제공하지 않음. 이전 전수조사(2026-04-02)에서도 확인된 사실:
+
+- devlog "endpoint_url 데이터 품질: 73.4%가 `' '`(공백)" (296행)
+- devlog "pk_no_options 4,899건 중 93%가 외부 포탈 URL을 보유" (379행)
+
+**실제 외부 URL은 존재하지만 수집하지 않고 있음:**
+
+data.go.kr 상세 페이지(`/data/{list_id}/openapi.do`) HTML에는 외부 포탈 링크가 `<a>` 태그로 존재. 이전 크롤링(12,108 페이지, `data/pages/`)에서 이미 확인. 그러나 build_bundle.rs의 현재 추출 경로(Swagger → Gateway AJAX)에는 외부 URL 수집 단계가 없음.
+
+**영향 범위:**
+
+| 항목 | 영향 |
+|------|------|
+| CLI `spec` 조회 | External API에 "외부 포탈" 안내만, 실제 URL 미제공 |
+| MCP 서버 | AI가 External API의 실제 접속처를 모름 |
+| 카탈로그 문서 | External 섹션 링크 전부 `—` (ID 클릭으로 data.go.kr 우회 가능) |
+
+**해결 방향:**
+
+build_bundle.rs에 외부 URL 수집 단계 추가:
+1. LINK API (PRDE04)로 분류된 list_id에 대해 openapi.do 페이지 요청
+2. HTML에서 외부 포탈 `<a>` 태그 추출 (이미 data/pages/에 크롤링 데이터 존재)
+3. 추출된 URL을 CatalogEntry.endpoint_url에 저장
+4. 번들 리빌드 시 External API의 endpoint_url이 실제 외부 URL로 채워짐
+
+기존 크롤링 데이터(`data/pages/`)를 활용하면 네트워크 요청 없이 로컬에서 추출 가능.
+
+### 다음 작업
+
+- External API 외부 URL 수집 로직 구현 (build_bundle.rs 또는 별도 바이너리)
+- bundle-gateway.zstd를 기본 번들로 교체
+- 쿠키 격리 필요 여부 검증
+- CI 수집 파이프라인

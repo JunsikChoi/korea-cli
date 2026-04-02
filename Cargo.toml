@@ -58,6 +58,10 @@ path = "src/bin/analyze_pages.rs"
 name = "summarize-signals"
 path = "src/bin/summarize_signals.rs"
 
+[[bin]]
+name = "gen-catalog-docs"
+path = "src/bin/gen_catalog_docs.rs"
+
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"

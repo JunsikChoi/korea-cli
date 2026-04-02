@@ -7,3 +7,5 @@
 data/bundle.zstd
 data/survey.json
 data/html-survey.json
+data/pages/
+data/crawl_failures.json

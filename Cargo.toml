@@ -50,6 +50,14 @@ path = "src/bin/html_survey.rs"
 name = "crawl-pages"
 path = "src/bin/crawl_pages.rs"
 
+[[bin]]
+name = "analyze-pages"
+path = "src/bin/analyze_pages.rs"
+
+[[bin]]
+name = "summarize-signals"
+path = "src/bin/summarize_signals.rs"
+
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"

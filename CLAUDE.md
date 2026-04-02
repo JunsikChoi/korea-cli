@@ -14,7 +14,7 @@
 src/
 ├── main.rs        # CLI 엔트리포인트, clap 서브커맨드 정의
 ├── core/
-│   ├── types.rs       # 타입 (Bundle, CatalogEntry, ApiSpec, SpecStatus 등)
+│   ├── types.rs       # 타입 (Bundle, CatalogEntry, ApiSpec, SpecStatus, ClassificationHints 등)
 │   ├── bundle.rs      # 번들 로드/해제, 오버라이드 체인, 스키마 버전 관리
 │   ├── catalog.rs     # 카탈로그 검색, 메타 API 수집
 │   ├── swagger.rs     # Swagger 파싱 (parse_swagger, extract_swagger_json)
@@ -24,7 +24,12 @@ src/
 ├── config/        # 설정 관리 (~/.config/korea-cli/config.toml)
 ├── cli/           # CLI 서브커맨드 핸들러
 └── bin/
-    └── build_bundle.rs  # 번들 생성 도구 (릴리스용)
+    ├── build_bundle.rs  # 번들 생성 도구 (Swagger + Gateway AJAX 추출)
+    ├── survey.rs        # API 커버리지 서베이
+    ├── html_survey.rs   # HTML 구조 서베이
+    ├── crawl_pages.rs   # openapi.do 페이지 크롤러
+    ├── analyze_pages.rs # HTML 구조 신호 추출기
+    └── summarize_signals.rs # 신호 빈도 분석 + 클러스터링
 ```
 
 ## 코딩 컨벤션

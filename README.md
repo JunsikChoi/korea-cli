@@ -161,9 +161,12 @@ korea-cli/
 │   ├── cli/             # CLI 서브커맨드 핸들러
 │   ├── config/          # 설정 관리 (API 키, 환경변수)
 │   └── bin/
-│       ├── build_bundle.rs  # 번들 생성 도구 (릴리스용)
-│       ├── survey.rs        # API 전수조사 (Swagger/HTML 신호 분석)
-│       └── html_survey.rs   # HTML 스펙 전수조사 (pk/AJAX 프로브)
+│       ├── build_bundle.rs      # 번들 생성 도구 (Swagger + Gateway AJAX 추출)
+│       ├── survey.rs            # API 전수조사 (Swagger/HTML 신호 분석)
+│       ├── html_survey.rs       # HTML 스펙 전수조사 (pk/AJAX 프로브)
+│       ├── crawl_pages.rs       # openapi.do 페이지 크롤러
+│       ├── analyze_pages.rs     # HTML 구조 신호 추출기
+│       └── summarize_signals.rs # 신호 빈도 분석 + 클러스터링
 ├── build.rs             # 개발용 placeholder 번들 자동 생성
 ├── tests/               # 통합 테스트
 ├── docs/
@@ -186,6 +189,8 @@ korea-cli/
 | [Spec 품질 개선 설계](docs/plans/2026-04-01-spec-quality-design.md) | SpecStatus, 스키마 버전, HTML 파서 설계 |
 | [API 전수조사 보고서](data/survey-report.md) | 12,108 API Swagger/HTML 신호 전수분석 |
 | [HTML 스펙 전수조사](data/html-survey-report.md) | HTML 폴백 경로 전수조사 — 커버리지 32.6%→53.5% |
+| [Gateway 스펙 추출 설계](docs/specs/2026-04-02-gateway-spec-extraction-design.md) | Gateway API AJAX 추출 아키텍처 |
+| [Gateway 스펙 추출 플랜](docs/plans/2026-04-02-gateway-spec-extraction-plan.md) | 구현 태스크 (TDD 기반) |
 
 ## 로드맵
 

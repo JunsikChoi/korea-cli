@@ -69,12 +69,12 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 - [x] HTML 전수조사 바이너리 (`html-survey`) 구현 + 실행
 - [x] 전수조사 결과 분석: 2,522개 신규 추출 가능 확인
 - [x] openapi.do 페이지 HTML 크롤러 (`crawl-pages`) — 수집/분석 분리 전략
-- [ ] 로컬 HTML 분석 도구 구현 (발견 기반 — 모든 유의미한 신호 추출)
-- [ ] build_bundle.rs에 HTML 폴백 경로 추가 (Swagger 실패 → pk+AJAX → 스펙 생성)
-  - openapi.do에서 pk + select 옵션 추출
-  - 각 operation마다 `selectApiDetailFunction.do` AJAX POST (Referer 필수)
+- [x] 로컬 HTML 분석 도구 구현 (발견 기반 — analyze-pages + summarize-signals)
+- [x] build_bundle.rs에 HTML 폴백 경로 추가 (분류 우선 파이프라인 — tyDetailCode → Swagger → Gateway AJAX)
+  - openapi.do에서 pk + select 옵션 + tyDetailCode + publicDataPk 추출
+  - 각 operation마다 `selectApiDetailFunction.do` AJAX POST (cookie-isolated client)
   - `parse_operation_detail` → `build_api_spec`으로 스펙 구성
-- [ ] html_parser.rs 보강 — td_fallback 우선 + 요청주소 미발견 시 서비스URL 폴백
+- [x] html_parser.rs 보강 — h4 기반 응답 필드 파싱 + 요청주소 미발견 시 서비스URL 폴백
 - [ ] 번들 리빌드 + 커버리지 검증 (목표: 6,475개 = 53.5%)
 - [ ] AJAX 부분 성공 662건 추가 파싱 (서비스URL 기반)
 

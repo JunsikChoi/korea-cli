@@ -263,7 +263,14 @@ async fn survey_single_api(
         .unwrap_or(false);
     let current_classification = format!(
         "{:?}",
-        korea_cli::core::types::SpecStatus::classify(has_spec, is_skeleton, endpoint_url)
+        korea_cli::core::types::SpecStatus::classify(
+            &korea_cli::core::types::ClassificationHints {
+                has_spec,
+                is_skeleton,
+                endpoint_url,
+                ..Default::default()
+            }
+        )
     );
 
     match analysis {

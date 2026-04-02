@@ -481,6 +481,49 @@ Size:    2.0 GB (페이지당 평균 ~168KB)
 
 ### 다음 작업
 
-- signal_summary.json을 분석하여 패턴 그룹 확정
-- 각 그룹과 현재 SpecStatus 매핑 비교
-- build_bundle.rs 분류 로직 개선
+- ~~signal_summary.json을 분석하여 패턴 그룹 확정~~ ✓ (설계 스펙으로 정리)
+- ~~각 그룹과 현재 SpecStatus 매핑 비교~~ ✓
+- ~~build_bundle.rs 분류 로직 개선~~ ✓
+
+---
+
+## 2026-04-03: Gateway API 스펙 추출 구현
+
+### 배경
+
+HTML 패턴 발견에서 확인된 3개 패턴(Swagger inline, Swagger URL, Gateway AJAX)을 build_bundle.rs에 분류 우선 파이프라인으로 통합. Gateway API ~3,187개에서 AJAX로 ApiSpec을 추출하여 Available API 수를 +79% 증가시키는 것이 목표.
+
+### 완료
+
+- `ClassificationHints` 구조체 도입 (types.rs) — positional bool → named fields, `is_link_api` 지원
+- `PageInfo` 확장 (html_parser.rs) — `ty_detail_code`, `public_data_pk` 추출
+- `ParsedOperation`에 `summary` 필드 추가 (h4.tit 추출)
+- 응답 필드 파싱 h4 기반 전략 + tr-scan fallback
+- 빈 요청주소 service_url fallback (Operation 누락 방지)
+- `build_bundle.rs` 전면 개편:
+  - `SpecResult` enum (Spec/Bail with metadata)
+  - 분류 우선 파이프라인: tyDetailCode → Swagger inline → Swagger URL → Gateway AJAX
+  - `fetch_gateway_spec`: cookie-isolated reqwest client, Semaphore rate limiting
+  - LINK API (PRDE04) 즉시 External 분류
+  - `--ajax-concurrency`, `--ajax-delay` 파라미터
+- reqwest `cookies` feature 추가 (Cargo.toml)
+- 8개 신규 테스트, 전체 159 테스트 통과
+
+### 핵심 결정
+
+- **쿠키 격리**: Gateway API마다 독립 reqwest::Client 생성. data.go.kr AJAX 엔드포인트가 세션 기반 응답을 반환할 가능성 대비. E2E 검증 후 불필요하면 제거 예정
+- **Semaphore rate limiting**: permit을 send+sleep 동안 보유, body read 전 해제. 서버 부하는 요청 시점에 발생하므로 이 순서가 적절
+- **SpecResult vs Result<ApiSpec>**: bail 시 `is_link_api` 힌트를 분류에 전달해야 하므로 전용 enum 채택. Box<ApiSpec>으로 enum 사이즈 최적화
+- **ResponseFormat::Xml 하드코딩**: Gateway API의 기본 응답 형식. JSON 감지는 후속 작업
+
+### 리뷰 결과
+
+- /review (backend-architect + Claude 교차검증): BLOCK 1건 해소 (regex LazyLock)
+- /eval (3명 전문가 병렬): BLOCK 0건, WARNING 4건 수정 (parse error 로깅, HTTP 상태 확인, publicDataPk fallback 경고, ResponseFormat TODO)
+
+### 다음 작업
+
+- 소규모 E2E 검증 (실제 data.go.kr에서 Gateway API 3-5개 테스트)
+- 번들 리빌드 + 커버리지 검증 (Available 수 변화 확인)
+- 쿠키 격리 필요 여부 검증 (불필요하면 공유 client로 전환)
+- ResponseFormat JSON 감지 구현

@@ -70,6 +70,15 @@ pub enum SpecStatus {
     Unsupported,
 }
 
+/// classify 함수의 입력 — named fields로 인자 순서 혼동 방지
+#[derive(Debug, Default)]
+pub struct ClassificationHints<'a> {
+    pub has_spec: bool,
+    pub is_skeleton: bool,
+    pub endpoint_url: &'a str,
+    pub is_link_api: bool,
+}
+
 impl SpecStatus {
     pub fn is_callable(&self) -> bool {
         matches!(self, Self::Available)
@@ -87,27 +96,30 @@ impl SpecStatus {
     }
 
     /// Classify spec status based on available data.
-    pub fn classify(has_spec: bool, is_skeleton: bool, endpoint_url: &str) -> Self {
-        if has_spec {
+    pub fn classify(hints: &ClassificationHints) -> Self {
+        if hints.is_link_api {
+            return Self::External;
+        }
+        if hints.has_spec {
             return Self::Available;
         }
-        if is_skeleton {
+        if hints.is_skeleton {
             return Self::Skeleton;
         }
-        let url_lower = endpoint_url.to_lowercase();
+        let url_lower = hints.endpoint_url.to_lowercase();
         if url_lower.contains("wms") || url_lower.contains("wfs") || url_lower.contains("wcs") {
             return Self::Unsupported;
         }
-        if endpoint_url.contains("apis.data.go.kr") {
+        if hints.endpoint_url.contains("apis.data.go.kr") {
             return Self::HtmlOnly;
         }
-        if !endpoint_url.is_empty()
-            && !endpoint_url.contains("data.go.kr")
-            && !endpoint_url.contains("api.odcloud.kr")
+        if !hints.endpoint_url.is_empty()
+            && !hints.endpoint_url.contains("data.go.kr")
+            && !hints.endpoint_url.contains("api.odcloud.kr")
         {
             return Self::External;
         }
-        if endpoint_url.is_empty() {
+        if hints.endpoint_url.is_empty() {
             return Self::CatalogOnly;
         }
         // Has a data.go.kr/odcloud URL but no spec
@@ -440,7 +452,11 @@ mod tests {
     #[test]
     fn test_classify_available() {
         assert_eq!(
-            SpecStatus::classify(true, false, "https://apis.data.go.kr/x"),
+            SpecStatus::classify(&ClassificationHints {
+                has_spec: true,
+                endpoint_url: "https://apis.data.go.kr/x",
+                ..Default::default()
+            }),
             SpecStatus::Available,
         );
     }
@@ -448,7 +464,11 @@ mod tests {
     #[test]
     fn test_classify_skeleton() {
         assert_eq!(
-            SpecStatus::classify(false, true, "https://apihub.kma.go.kr/x"),
+            SpecStatus::classify(&ClassificationHints {
+                is_skeleton: true,
+                endpoint_url: "https://apihub.kma.go.kr/x",
+                ..Default::default()
+            }),
             SpecStatus::Skeleton,
         );
     }
@@ -456,7 +476,10 @@ mod tests {
     #[test]
     fn test_classify_unsupported_wms() {
         assert_eq!(
-            SpecStatus::classify(false, false, "https://example.kr/wms/service"),
+            SpecStatus::classify(&ClassificationHints {
+                endpoint_url: "https://example.kr/wms/service",
+                ..Default::default()
+            }),
             SpecStatus::Unsupported,
         );
     }
@@ -464,7 +487,10 @@ mod tests {
     #[test]
     fn test_classify_html_only() {
         assert_eq!(
-            SpecStatus::classify(false, false, "https://apis.data.go.kr/1360000/Weather"),
+            SpecStatus::classify(&ClassificationHints {
+                endpoint_url: "https://apis.data.go.kr/1360000/Weather",
+                ..Default::default()
+            }),
             SpecStatus::HtmlOnly,
         );
     }
@@ -472,7 +498,10 @@ mod tests {
     #[test]
     fn test_classify_external() {
         assert_eq!(
-            SpecStatus::classify(false, false, "https://apihub.kma.go.kr/api/typ01"),
+            SpecStatus::classify(&ClassificationHints {
+                endpoint_url: "https://apihub.kma.go.kr/api/typ01",
+                ..Default::default()
+            }),
             SpecStatus::External,
         );
     }
@@ -480,7 +509,7 @@ mod tests {
     #[test]
     fn test_classify_catalog_only() {
         assert_eq!(
-            SpecStatus::classify(false, false, ""),
+            SpecStatus::classify(&ClassificationHints::default()),
             SpecStatus::CatalogOnly,
         );
     }
@@ -488,8 +517,32 @@ mod tests {
     #[test]
     fn test_classify_odcloud_no_spec() {
         assert_eq!(
-            SpecStatus::classify(false, false, "https://api.odcloud.kr/api/test"),
+            SpecStatus::classify(&ClassificationHints {
+                endpoint_url: "https://api.odcloud.kr/api/test",
+                ..Default::default()
+            }),
             SpecStatus::HtmlOnly,
+        );
+    }
+
+    #[test]
+    fn test_classify_link_api_returns_external() {
+        assert_eq!(
+            SpecStatus::classify(&ClassificationHints {
+                endpoint_url: "https://apis.data.go.kr/1360000/Weather",
+                is_link_api: true,
+                ..Default::default()
+            }),
+            SpecStatus::External,
+        );
+        assert_eq!(
+            SpecStatus::classify(&ClassificationHints {
+                has_spec: true,
+                endpoint_url: "https://apis.data.go.kr/x",
+                is_link_api: true,
+                ..Default::default()
+            }),
+            SpecStatus::External,
         );
     }
 }

@@ -1,5 +1,7 @@
 # Gateway API 스펙 추출 설계
 
+> **상태: ✅ 구현 완료 (2026-04-03)** — 구현 차이점: `SpecResult::Spec.spec`이 `Box<ApiSpec>`으로 래핑 (enum 사이즈 최적화), `fetch_gateway_spec`에서 `shared_client` 파라미터 제거 (내부 독립 client 생성).
+
 ## 목표
 
 번들 빌드 시 Swagger가 없는 Gateway API(클러스터 3+7, 3,187개)에서 `selectApiDetailFunction.do` AJAX 호출을 통해

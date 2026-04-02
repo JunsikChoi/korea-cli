@@ -12,6 +12,8 @@ use crate::core::types::*;
 #[derive(Debug, Clone)]
 pub struct PageInfo {
     pub public_data_detail_pk: String,
+    pub public_data_pk: Option<String>,
+    pub ty_detail_code: Option<String>,
     pub operations: Vec<OperationOption>,
 }
 
@@ -27,6 +29,7 @@ pub struct OperationOption {
 pub struct ParsedOperation {
     pub request_url: String,
     pub service_url: String,
+    pub summary: String,
     pub parameters: Vec<Parameter>,
     pub response_fields: Vec<ResponseField>,
 }
@@ -38,12 +41,16 @@ pub fn parse_openapi_page(html: &str) -> Result<PageInfo> {
     // Extract publicDataDetailPk from hidden input or JavaScript
     let pk = extract_public_data_detail_pk(&document, html)
         .context("publicDataDetailPk를 찾을 수 없습니다")?;
+    let public_data_pk = extract_hidden_input_value(&document, "publicDataPk");
+    let ty_detail_code = extract_ty_detail_code(html);
 
     // Extract operation list from <select id="open_api_detail_select">
     let operations = extract_operation_options(&document);
 
     Ok(PageInfo {
         public_data_detail_pk: pk,
+        public_data_pk,
+        ty_detail_code,
         operations,
     })
 }
@@ -54,12 +61,14 @@ pub fn parse_operation_detail(html: &str) -> Result<ParsedOperation> {
 
     let request_url = extract_labeled_url(&document, "요청주소").unwrap_or_default();
     let service_url = extract_labeled_url(&document, "서비스URL").unwrap_or_default();
+    let summary = extract_summary(&document);
     let parameters = extract_request_params(&document);
     let response_fields = extract_response_fields(&document);
 
     Ok(ParsedOperation {
         request_url,
         service_url,
+        summary,
         parameters,
         response_fields,
     })
@@ -93,18 +102,27 @@ pub fn build_api_spec(list_id: &str, parsed_ops: &[ParsedOperation]) -> Option<A
     let operations: Vec<Operation> = parsed_ops
         .iter()
         .filter_map(|op| {
+            // request_url이 있으면 base_url 기준으로 path 추출
+            // 없으면 service_url을 사용하고 path는 "/"
             let path = if !op.request_url.is_empty() && !base_url.is_empty() {
                 op.request_url
                     .strip_prefix(&base_url)
                     .unwrap_or(&op.request_url)
                     .to_string()
-            } else {
+            } else if !op.request_url.is_empty() {
                 op.request_url.clone()
+            } else if !op.service_url.is_empty() {
+                // 빈 요청주소 + 서비스URL만 있는 경우 → path "/"
+                "/".to_string()
+            } else {
+                return None; // 둘 다 비어있으면 skip
             };
 
-            if path.is_empty() && op.request_url.is_empty() {
-                return None;
-            }
+            let final_path = if path.is_empty() {
+                "/".to_string()
+            } else {
+                path
+            };
 
             // Filter out serviceKey from user-visible parameters
             let params: Vec<Parameter> = op
@@ -115,13 +133,9 @@ pub fn build_api_spec(list_id: &str, parsed_ops: &[ParsedOperation]) -> Option<A
                 .collect();
 
             Some(Operation {
-                path: if path.is_empty() {
-                    "/".to_string()
-                } else {
-                    path
-                },
+                path: final_path,
                 method: HttpMethod::Get,
-                summary: String::new(),
+                summary: op.summary.clone(),
                 content_type: ContentType::None,
                 parameters: params,
                 request_body: None,
@@ -145,7 +159,7 @@ pub fn build_api_spec(list_id: &str, parsed_ops: &[ParsedOperation]) -> Option<A
             data_path: vec![],
             error_check: ErrorCheck::HttpStatus,
             pagination: None,
-            format: ResponseFormat::Xml,
+            format: ResponseFormat::Xml, // TODO: Gateway API 중 JSON 응답도 존재 — _type 파라미터 감지로 개선
         },
         operations,
         fetched_at,
@@ -178,13 +192,49 @@ fn extract_public_data_detail_pk(document: &Html, raw_html: &str) -> Option<Stri
     }
 
     // 3) regex fallback (id= 또는 name= 모두 매칭)
-    let re = regex::Regex::new(
-        r#"(?s)(?:name|id)\s*=\s*["']?publicDataDetailPk["']?\s+value\s*=\s*["']([^"']+)["']"#,
-    )
-    .ok()?;
-    re.captures(raw_html)
+    use std::sync::LazyLock;
+    static RE_PK: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(
+            r#"(?s)(?:name|id)\s*=\s*["']?publicDataDetailPk["']?\s+value\s*=\s*["']([^"']+)["']"#,
+        )
+        .unwrap()
+    });
+    RE_PK
+        .captures(raw_html)
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().to_string())
+}
+
+fn extract_ty_detail_code(raw_html: &str) -> Option<String> {
+    use std::sync::LazyLock;
+    static RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"var\s+tyDetailCode\s*=\s*["']([^"']+)["']"#).unwrap()
+    });
+    RE.captures(raw_html)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
+fn extract_summary(document: &Html) -> String {
+    let sel = match Selector::parse("h4.tit") {
+        Ok(s) => s,
+        Err(_) => return String::new(),
+    };
+    document
+        .select(&sel)
+        .next()
+        .map(|el| el.text().collect::<String>().trim().to_string())
+        .unwrap_or_default()
+}
+
+fn extract_hidden_input_value(document: &Html, id: &str) -> Option<String> {
+    let selector = Selector::parse(&format!("input#{id}")).ok()?;
+    document
+        .select(&selector)
+        .next()
+        .and_then(|el| el.value().attr("value"))
+        .filter(|v| !v.is_empty())
+        .map(|v| v.to_string())
 }
 
 fn extract_operation_options(document: &Html) -> Vec<OperationOption> {
@@ -318,7 +368,79 @@ fn extract_request_params_fallback(document: &Html) -> Vec<Parameter> {
 }
 
 fn extract_response_fields(document: &Html) -> Vec<ResponseField> {
-    // Look for output result table — typically the second table or one after "출력결과"
+    // Strategy 1: h4 기반 — "출력결과" h4 다음의 table에서 추출
+    if let Some(fields) = extract_response_fields_by_h4(document) {
+        if !fields.is_empty() {
+            return fields;
+        }
+    }
+
+    // Strategy 2 (fallback): 기존 tr 스캔 방식 — 레거시 호환
+    extract_response_fields_by_tr_scan(document)
+}
+
+fn extract_response_fields_by_h4(document: &Html) -> Option<Vec<ResponseField>> {
+    use scraper::node::Node;
+
+    let h4_sel = Selector::parse("h4").ok()?;
+
+    for h4 in document.select(&h4_sel) {
+        let text = h4.text().collect::<String>();
+        if !text.contains("출력결과") {
+            continue;
+        }
+
+        // h4 다음 형제 노드에서 첫 번째 <table> 찾기
+        let mut sibling = h4.next_sibling();
+        while let Some(node) = sibling {
+            if let Node::Element(ref el) = node.value() {
+                if el.name() == "table" {
+                    if let Some(table_el) = scraper::ElementRef::wrap(node) {
+                        return Some(parse_table_rows_as_response_fields(table_el));
+                    }
+                }
+            }
+            sibling = node.next_sibling();
+        }
+    }
+    None
+}
+
+fn parse_table_rows_as_response_fields(table: scraper::ElementRef) -> Vec<ResponseField> {
+    let tr_sel = match Selector::parse("tr") {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    let td_sel = match Selector::parse("td") {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    let mut fields = Vec::new();
+    for row in table.select(&tr_sel) {
+        let cells: Vec<String> = row
+            .select(&td_sel)
+            .map(|td| td.text().collect::<String>().trim().to_string())
+            .collect();
+
+        // 최소 3컬럼: 순번, 항목명, ... , 설명
+        if cells.len() >= 3 {
+            let name = &cells[1];
+            if name.is_empty() || name == "항목명(영문)" || name == "항목명" {
+                continue;
+            }
+            let description = cells.last().cloned().unwrap_or_default();
+            fields.push(ResponseField {
+                name: name.clone(),
+                description,
+                field_type: "string".to_string(),
+            });
+        }
+    }
+    fields
+}
+
+fn extract_response_fields_by_tr_scan(document: &Html) -> Vec<ResponseField> {
     let td_sel = match Selector::parse("td") {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -337,7 +459,6 @@ fn extract_response_fields(document: &Html) -> Vec<ResponseField> {
             .map(|td| td.text().collect::<String>().trim().to_string())
             .collect();
 
-        // Detect response section by header row or th content
         let row_text = row.text().collect::<String>();
         if row_text.contains("출력결과") || row_text.contains("응답메시지") {
             in_response_section = true;
@@ -470,6 +591,7 @@ mod tests {
         let ops = vec![ParsedOperation {
             request_url: "https://apis.data.go.kr/test/getItems".into(),
             service_url: "https://apis.data.go.kr/test".into(),
+            summary: String::new(),
             parameters: vec![
                 Parameter {
                     name: "serviceKey".into(),
@@ -535,5 +657,138 @@ mod tests {
     #[test]
     fn test_build_api_spec_empty_returns_none() {
         assert!(build_api_spec("12345", &[]).is_none());
+    }
+
+    #[test]
+    fn test_build_api_spec_empty_request_url_uses_service_url() {
+        let ops = vec![ParsedOperation {
+            request_url: "".into(),
+            service_url: "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0".into(),
+            summary: "초단기실황조회".into(),
+            parameters: vec![Parameter {
+                name: "serviceKey".into(),
+                description: "인증키".into(),
+                location: ParamLocation::Query,
+                param_type: "string".into(),
+                required: true,
+                default: None,
+            }],
+            response_fields: vec![],
+        }];
+
+        let spec = build_api_spec("15084084", &ops);
+        assert!(
+            spec.is_some(),
+            "빈 request_url이어도 service_url이 있으면 Operation 생성"
+        );
+        let spec = spec.unwrap();
+        assert_eq!(spec.operations.len(), 1);
+        assert_eq!(spec.operations[0].path, "/");
+        assert_eq!(spec.operations[0].summary, "초단기실황조회");
+    }
+
+    #[test]
+    fn test_extract_response_fields_h4_based() {
+        // 실제 data.go.kr AJAX 응답 구조: h4 + table 분리
+        let html = r#"
+        <div id="open-api-detail-result">
+            <h4>요청변수(Request Parameter)</h4>
+            <table>
+                <tr><th>순번</th><th>항목명(영문)</th><th>타입</th><th>크기</th><th>항목구분</th><th>항목설명</th></tr>
+                <tr><td>1</td><td>serviceKey</td><td>string</td><td>100</td><td>필수</td><td>인증키</td></tr>
+            </table>
+            <h4>출력결과(Response Element)</h4>
+            <table>
+                <tr><th>순번</th><th>항목명(영문)</th><th>타입</th><th>크기</th><th>항목설명</th></tr>
+                <tr><td>1</td><td>resultCode</td><td>string</td><td>2</td><td>결과코드</td></tr>
+                <tr><td>2</td><td>resultMsg</td><td>string</td><td>50</td><td>결과메시지</td></tr>
+                <tr><td>3</td><td>baseDate</td><td>string</td><td>8</td><td>발표일자</td></tr>
+            </table>
+        </div>
+        "#;
+
+        let document = Html::parse_fragment(html);
+        let fields = extract_response_fields(&document);
+        assert_eq!(fields.len(), 3);
+        assert_eq!(fields[0].name, "resultCode");
+        assert_eq!(fields[0].description, "결과코드");
+        assert_eq!(fields[1].name, "resultMsg");
+        assert_eq!(fields[2].name, "baseDate");
+    }
+
+    #[test]
+    fn test_parse_operation_detail_extracts_summary() {
+        let html = r#"
+        <div id="open-api-detail-result">
+            <h4 class="tit">초단기실황조회</h4>
+            <p><strong>요청주소</strong> https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst</p>
+            <p><strong>서비스URL</strong> https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0</p>
+            <table>
+                <tr data-paramtr-nm="serviceKey" data-paramtr-division="필수" data-paramtr-dc="인증키">
+                    <td>1</td><td>serviceKey</td><td>string</td><td>100</td><td>필수</td><td>인증키</td>
+                </tr>
+            </table>
+        </div>
+        "#;
+
+        let op = parse_operation_detail(html).unwrap();
+        assert_eq!(op.summary, "초단기실황조회");
+    }
+
+    #[test]
+    fn test_parse_operation_detail_no_summary() {
+        let html = r#"
+        <div>
+            <p><strong>요청주소</strong> https://apis.data.go.kr/test/getItems</p>
+            <p><strong>서비스URL</strong> https://apis.data.go.kr/test</p>
+        </div>
+        "#;
+        let op = parse_operation_detail(html).unwrap();
+        assert!(op.summary.is_empty());
+    }
+
+    #[test]
+    fn test_parse_openapi_page_extracts_ty_detail_code() {
+        let html = r#"
+        <html><body>
+            <script>
+                var tyDetailCode = 'PRDE04';
+            </script>
+            <input type="hidden" id="publicDataDetailPk" value="uddi:abc-123">
+            <input type="hidden" id="publicDataPk" value="15061357">
+        </body></html>
+        "#;
+        let info = parse_openapi_page(html).unwrap();
+        assert_eq!(info.ty_detail_code.as_deref(), Some("PRDE04"));
+        assert_eq!(info.public_data_pk.as_deref(), Some("15061357"));
+    }
+
+    #[test]
+    fn test_parse_openapi_page_no_ty_detail_code() {
+        let html = r#"
+        <html><body>
+            <input type="hidden" name="publicDataDetailPk" value="uddi:12345-abcde">
+            <select id="open_api_detail_select">
+                <option value="1001">getWeather</option>
+            </select>
+        </body></html>
+        "#;
+        let info = parse_openapi_page(html).unwrap();
+        assert!(info.ty_detail_code.is_none());
+        assert!(info.public_data_pk.is_none());
+    }
+
+    #[test]
+    fn test_parse_openapi_page_extracts_ty_detail_code_double_quotes() {
+        let html = r#"
+        <html><body>
+            <script>
+                var tyDetailCode = "PRDE04";
+            </script>
+            <input type="hidden" id="publicDataDetailPk" value="uddi:abc-123">
+        </body></html>
+        "#;
+        let info = parse_openapi_page(html).unwrap();
+        assert_eq!(info.ty_detail_code.as_deref(), Some("PRDE04"));
     }
 }

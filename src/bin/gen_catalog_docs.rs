@@ -2,12 +2,12 @@
 //!
 //! Usage: cargo run --bin gen-catalog-docs -- --bundle data/bundle.zstd --output docs/api-catalog
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use korea_cli::core::types::{Bundle, CatalogEntry, SpecStatus, CURRENT_SCHEMA_VERSION};
+use korea_cli::core::types::{ApiSpec, Bundle, CatalogEntry, SpecStatus, CURRENT_SCHEMA_VERSION};
 
 #[derive(Parser)]
 #[command(about = "번들에서 API 카탈로그 markdown 문서를 생성한다")]
@@ -40,7 +40,7 @@ fn group_by_org(bundle: &Bundle) -> BTreeMap<String, Vec<&CatalogEntry>> {
 }
 
 /// 기관명을 파일시스템 안전한 이름으로 변환. [B2][B3]
-/// 한글/알파벳/숫자/하이픈만 유지, 나머지 하이픈으로 치환, 연속 하이픈 제거.
+/// 한글/알파벳/숫자/하이픈/언더스코어만 유지, 나머지 하이픈으로 치환, 연속 하이픈 제거.
 fn sanitize_filename(s: &str) -> String {
     let replaced: String = s
         .chars()
@@ -59,26 +59,36 @@ fn sanitize_filename(s: &str) -> String {
         .join("-")
 }
 
+/// 기관명 → 파일명 변환 (sanitize + 빈 결과 fallback). [eval B-1]
+/// render_readme와 main 양쪽에서 동일한 파일명을 생성하기 위해 공유.
+fn org_safe_filename(org: &str, fallback_list_id: &str) -> String {
+    let safe = sanitize_filename(org);
+    if safe.is_empty() {
+        format!("_org_{}", fallback_list_id)
+    } else {
+        safe
+    }
+}
+
 /// markdown 테이블 셀에서 위험 문자 이스케이프. [B1]
 fn escape_md_table(s: &str) -> String {
-    s.replace('|', r"\|").replace('\n', " ")
+    s.replace('|', r"\|").replace('\r', "").replace('\n', " ")
 }
 
 /// 문자열을 max_len 이하로 자르고 '…' 추가
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.chars().count() <= max_len {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max_len - 1).collect();
-        format!("{}…", truncated)
+    if max_len == 0 || s.chars().count() <= max_len {
+        return s.to_string();
     }
+    let truncated: String = s.chars().take(max_len - 1).collect();
+    format!("{}…", truncated)
 }
 
 /// 기관별 markdown 페이지 생성. title/description에 escape_md_table 적용 [B1].
 fn render_org_page(
     org_name: &str,
     entries: &[&CatalogEntry],
-    specs: &std::collections::HashMap<String, korea_cli::core::types::ApiSpec>,
+    specs: &HashMap<String, ApiSpec>,
 ) -> String {
     let available: Vec<_> = entries
         .iter()
@@ -97,7 +107,8 @@ fn render_org_page(
         .collect();
 
     let mut md = String::new();
-    md.push_str(&format!("# {}\n\n", org_name));
+    let safe_heading = org_name.replace('\r', "").replace('\n', " ");
+    md.push_str(&format!("# {}\n\n", safe_heading));
     md.push_str(&format!(
         "> {} API | 호출 가능 {} | 외부 링크 {}\n\n",
         entries.len(),
@@ -138,7 +149,8 @@ fn render_org_page(
             let desc = escape_md_table(&truncate(&e.description, 60));
             let url = &e.endpoint_url;
             let link = if url.starts_with("http") {
-                format!("[링크]({})", url)
+                let safe_url = url.replace('>', "%3E"); // [eval B-2]
+                format!("[링크](<{}>)", safe_url)
             } else {
                 "—".into()
             };
@@ -158,8 +170,8 @@ fn render_org_page(
         for e in &other {
             let title = escape_md_table(&e.title);
             md.push_str(&format!(
-                "| {} | `{}` | {:?} |\n",
-                title, e.list_id, e.spec_status
+                "| {} | `{}` | {} |\n",
+                title, e.list_id, e.spec_status.user_message()
             ));
         }
         md.push('\n');
@@ -170,6 +182,7 @@ fn render_org_page(
 
 /// 기관별 통계 [W8]
 struct OrgStats {
+    safe_filename: String, // [eval B-1] render_readme와 main의 파일명 일관성
     org: String,
     total: usize,
     available: usize,
@@ -181,7 +194,7 @@ struct OrgStats {
 /// 요약 README.md 생성 (통계 + 기관별 목차)
 fn render_readme(
     groups: &BTreeMap<String, Vec<&CatalogEntry>>,
-    specs: &std::collections::HashMap<String, korea_cli::core::types::ApiSpec>,
+    specs: &HashMap<String, ApiSpec>,
 ) -> String {
     let total_api: usize = groups.values().map(|v| v.len()).sum(); // [W2]
     let total_available: usize = groups
@@ -209,6 +222,7 @@ fn render_readme(
     let mut org_stats: Vec<OrgStats> = groups
         .iter()
         .map(|(org, entries)| OrgStats {
+            safe_filename: org_safe_filename(org, &entries[0].list_id), // [eval B-1]
             org: org.clone(),
             total: entries.len(),
             available: entries
@@ -234,10 +248,10 @@ fn render_readme(
     md.push_str("| 기관 | 전체 | 호출 가능 | 외부 링크 | 오퍼레이션 |\n");
     md.push_str("|------|-----:|---------:|---------:|-----------:|\n");
     for s in &org_stats {
-        let safe_org = sanitize_filename(&s.org); // [B3]
+        let org_display = escape_md_table(&s.org);
         md.push_str(&format!(
             "| [{}](by-org/{}.md) | {} | {} | {} | {} |\n",
-            s.org, safe_org, s.total, s.available, s.external, s.ops
+            org_display, s.safe_filename, s.total, s.available, s.external, s.ops
         ));
     }
     md.push('\n');
@@ -280,10 +294,20 @@ fn main() -> Result<()> {
     std::fs::write(args.output.join("README.md"), &readme)?;
     eprintln!("README.md 생성");
 
-    // 기관별 파일 생성 [B3]
+    // 기관별 파일 생성 — 공유 org_safe_filename + 충돌 감지 [eval B-1][eval W1]
+    let mut seen_filenames: HashMap<String, String> = HashMap::new();
     for (org, entries) in &groups {
+        let safe_name = org_safe_filename(org, &entries[0].list_id);
+        if let Some(prev_org) = seen_filenames.get(&safe_name) {
+            anyhow::bail!(
+                "파일명 충돌: {:?}와 {:?} → {:?}.md",
+                prev_org,
+                org,
+                safe_name
+            );
+        }
+        seen_filenames.insert(safe_name.clone(), org.clone());
         let content = render_org_page(org, entries, &bundle.specs);
-        let safe_name = sanitize_filename(org);
         let path = by_org_dir.join(format!("{}.md", safe_name));
         std::fs::write(&path, &content)?;
     }
@@ -386,6 +410,15 @@ mod tests {
     fn test_escape_md_table() {
         assert_eq!(escape_md_table("GET | POST"), r"GET \| POST");
         assert_eq!(escape_md_table("줄바꿈\n포함"), "줄바꿈 포함");
+        assert_eq!(escape_md_table("CRLF\r\n포함"), "CRLF 포함");
+    }
+
+    #[test]
+    fn test_truncate() {
+        assert_eq!(truncate("hello", 0), "hello");
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("hello world", 6), "hello…");
+        assert_eq!(truncate("한글테스트", 3), "한글…");
     }
 
     #[test]

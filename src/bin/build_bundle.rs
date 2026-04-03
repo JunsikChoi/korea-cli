@@ -89,12 +89,25 @@ async fn main() -> Result<()> {
     let mut skeleton_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut link_api_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut external_urls: HashMap<String, String> = HashMap::new();
+    let mut partial_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut all_failed_ops: Vec<FailedOp> = Vec::new();
 
     for (id, result) in all_results {
         match result {
-            SpecResult::Spec { spec, .. } => {
+            SpecResult::Spec {
+                spec,
+                is_partial,
+                failed_ops,
+                ..
+            } => {
+                if is_partial {
+                    partial_ids.insert(id.clone());
+                    all_failed_ops.extend(failed_ops);
+                }
                 if spec.operations.is_empty() {
-                    skeleton_ids.insert(id);
+                    if !is_partial {
+                        skeleton_ids.insert(id);
+                    }
                 } else {
                     specs.insert(id, *spec);
                 }
@@ -105,7 +118,9 @@ async fn main() -> Result<()> {
                     external_urls.insert(id, u);
                 }
             }
-            SpecResult::Bail { .. } => {}
+            SpecResult::Bail { failed_ops, .. } => {
+                all_failed_ops.extend(failed_ops);
+            }
         }
     }
     eprintln!(
@@ -124,6 +139,13 @@ async fn main() -> Result<()> {
             (external_urls.len() as f64 / link_api_ids.len() as f64) * 100.0,
         );
     }
+    if !partial_ids.is_empty() {
+        eprintln!(
+            "  partial: {} APIs ({} failed ops)",
+            partial_ids.len(),
+            all_failed_ops.len()
+        );
+    }
 
     // Step 3: ClassificationHints로 classify
     eprintln!("\n=== Step 3/4: 번들 구성 ===");
@@ -140,7 +162,7 @@ async fn main() -> Result<()> {
                 is_skeleton: skeleton_ids.contains(&svc.list_id),
                 endpoint_url: &effective_url,
                 is_link_api: link_api_ids.contains(&svc.list_id),
-                is_partial: false, // Task 4에서 partial_ids로 교체
+                is_partial: partial_ids.contains(&svc.list_id),
             });
             CatalogEntry {
                 list_id: svc.list_id.clone(),
@@ -180,6 +202,21 @@ async fn main() -> Result<()> {
         catalog,
         specs,
     };
+
+    // failed_ops.json 출력
+    if !all_failed_ops.is_empty() {
+        let failed_ops_path = std::path::Path::new(&config.output)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("failed_ops.json");
+        let failed_json = serde_json::to_string_pretty(&all_failed_ops)?;
+        std::fs::write(&failed_ops_path, &failed_json)?;
+        eprintln!(
+            "  failed_ops: {} → {}",
+            all_failed_ops.len(),
+            failed_ops_path.display()
+        );
+    }
 
     // Step 4: Serialize + compress
     eprintln!("\n=== Step 4/4: 직렬화 + 압축 ===");

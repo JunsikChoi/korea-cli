@@ -1,0 +1,110 @@
+name: Bundle CI
+
+on:
+  schedule:
+    - cron: '0 17 * * 6'  # UTC 토요일 17:00 = KST 일요일 02:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 동시 실행 방지 — 수집 중복 및 태그 충돌 방지
+concurrency:
+  group: bundle-ci
+  cancel-in-progress: false
+
+env:
+  BUNDLE_PATH: data/bundle.zstd
+
+jobs:
+  build-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust 캐시 설정
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Rust 빌드
+        run: cargo build --release --bin build-bundle --bin gen-catalog-docs
+
+      - name: 번들 수집
+        id: collect
+        run: ./target/release/build-bundle --output $BUNDLE_PATH
+        env:
+          DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
+
+      - name: 실패분 재시도
+        if: steps.collect.outcome == 'success'
+        run: |
+          if [ -s data/failed_ops.json ]; then
+            ./target/release/build-bundle \
+              --output $BUNDLE_PATH \
+              --retry-stubs data/failed_ops.json \
+              --max-retry-time 600
+          else
+            echo "failed_ops.json 없음 또는 비어있음 — retry skip"
+          fi
+        env:
+          DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
+
+      - name: 변경 감지
+        id: check
+        run: |
+          NEW_HASH=$(sha256sum $BUNDLE_PATH | awk '{print $1}')
+          echo "new_hash=$NEW_HASH" >> $GITHUB_OUTPUT
+
+          # 이전 bundle- 태그 릴리즈에서 번들 다운로드 시도
+          PREV_TAG=$(gh release list --limit 20 --json tagName --jq '[.[].tagName | select(startswith("bundle-"))][0]' 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ] && gh release download "$PREV_TAG" --pattern bundle.zstd --dir /tmp/prev --repo "${{ github.repository }}" 2>/dev/null; then
+            OLD_HASH=$(sha256sum /tmp/prev/bundle.zstd | awk '{print $1}')
+            echo "old_hash=$OLD_HASH" >> $GITHUB_OUTPUT
+            if [ "$NEW_HASH" = "$OLD_HASH" ]; then
+              echo "changed=false" >> $GITHUB_OUTPUT
+              echo "번들 변경 없음 — skip"
+            else
+              echo "changed=true" >> $GITHUB_OUTPUT
+              echo "번들 변경 감지!"
+            fi
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "이전 릴리즈 없음 — 최초 배포"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: 카탈로그 문서 재생성
+        if: steps.check.outputs.changed == 'true'
+        run: ./target/release/gen-catalog-docs --bundle $BUNDLE_PATH
+
+      - name: 문서 커밋 + 푸시
+        if: steps.check.outputs.changed == 'true'
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet docs/api-catalog/; then
+            echo "문서 변경 없음"
+          else
+            git add docs/api-catalog/
+            DATE=$(date +%Y-%m-%d)
+            git pull --rebase origin main
+            git commit -m "docs: 카탈로그 문서 자동 업데이트 ($DATE)"
+            git push
+          fi
+
+      - name: GitHub Release 생성
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          TAG="bundle-${DATE}-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" $BUNDLE_PATH \
+            --title "Bundle ${DATE}" \
+            --latest \
+            --notes "자동 수집 ${DATE}"
+        env:
+          GH_TOKEN: ${{ github.token }}

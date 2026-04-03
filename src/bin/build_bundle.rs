@@ -4,8 +4,9 @@
 //!
 //! Estimated time: ~15-20 minutes for 12K APIs with concurrency=5.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::stream::{self, StreamExt};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -25,6 +26,27 @@ struct BuildConfig {
     delay_ms: u64,
     ajax_concurrency: usize,
     ajax_delay_ms: u64,
+    retry_timeout_secs: u64,
+    retry_stubs: Option<String>,
+    max_retry_time: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum ErrorType {
+    NetworkTimeout,
+    RateLimited,
+    BodyReadError,
+    ParseError,
+    ConnectionError,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FailedOp {
+    list_id: String,
+    seq_no: String,
+    op_name: String,
+    error_type: ErrorType,
+    error_message: String,
 }
 
 /// fetch_single_spec 결과 — 스펙 또는 분류 힌트
@@ -34,9 +56,14 @@ enum SpecResult {
     Spec {
         spec: Box<ApiSpec>,
         is_gateway: bool,
+        is_partial: bool,
+        failed_ops: Vec<FailedOp>,
     },
     /// 스펙 없음 — bail 이유
-    Bail { reason: String },
+    Bail {
+        reason: String,
+        failed_ops: Vec<FailedOp>,
+    },
     /// LINK API (PRDE04) — 외부 포탈 URL 포함 가능
     ExternalLink { url: Option<String> },
 }
@@ -113,6 +140,7 @@ async fn main() -> Result<()> {
                 is_skeleton: skeleton_ids.contains(&svc.list_id),
                 endpoint_url: &effective_url,
                 is_link_api: link_api_ids.contains(&svc.list_id),
+                is_partial: false, // Task 4에서 partial_ids로 교체
             });
             CatalogEntry {
                 list_id: svc.list_id.clone(),
@@ -200,6 +228,7 @@ async fn collect_specs(services: &[ApiService], config: &BuildConfig) -> Vec<(St
             let list_id = svc.list_id.clone();
             let delay_ms = config.delay_ms;
             let ajax_delay_ms = config.ajax_delay_ms;
+            let timeout_secs = config.retry_timeout_secs;
             let ajax_sem = ajax_semaphore.clone();
             let sc = success_count.clone();
             let fc = fail_count.clone();
@@ -207,7 +236,9 @@ async fn collect_specs(services: &[ApiService], config: &BuildConfig) -> Vec<(St
             let lc = link_count.clone();
 
             async move {
-                let result = fetch_single_spec(&client, &list_id, &ajax_sem, ajax_delay_ms).await;
+                let result =
+                    fetch_single_spec(&client, &list_id, &ajax_sem, ajax_delay_ms, timeout_secs)
+                        .await;
 
                 match &result {
                     SpecResult::Spec { is_gateway, .. } => {
@@ -219,7 +250,7 @@ async fn collect_specs(services: &[ApiService], config: &BuildConfig) -> Vec<(St
                     SpecResult::ExternalLink { .. } => {
                         lc.fetch_add(1, Ordering::Relaxed);
                     }
-                    SpecResult::Bail { reason, .. } => {
+                    SpecResult::Bail { ref reason, .. } => {
                         fc.fetch_add(1, Ordering::Relaxed);
                         let done = sc.load(Ordering::Relaxed)
                             + fc.load(Ordering::Relaxed)
@@ -259,6 +290,7 @@ async fn fetch_single_spec(
     list_id: &str,
     ajax_semaphore: &tokio::sync::Semaphore,
     ajax_delay_ms: u64,
+    timeout_secs: u64,
 ) -> SpecResult {
     let page_url = format!("https://www.data.go.kr/data/{list_id}/openapi.do");
     let html = match client.get(&page_url).send().await {
@@ -267,13 +299,14 @@ async fn fetch_single_spec(
             Err(e) => {
                 return SpecResult::Bail {
                     reason: format!("페이지 본문 읽기 실패: {e}"),
+                    failed_ops: vec![],
                 }
             }
         },
         Err(e) => {
             return SpecResult::Bail {
-
                 reason: format!("페이지 요청 실패: {e}"),
+                failed_ops: vec![],
             }
         }
     };
@@ -296,10 +329,12 @@ async fn fetch_single_spec(
             Ok(spec) => SpecResult::Spec {
                 spec: Box::new(spec),
                 is_gateway: false,
+                is_partial: false,
+                failed_ops: vec![],
             },
             Err(e) => SpecResult::Bail {
-
                 reason: format!("Swagger 파싱 실패: {e}"),
+                failed_ops: vec![],
             },
         };
     }
@@ -319,10 +354,12 @@ async fn fetch_single_spec(
             Ok(spec) => SpecResult::Spec {
                 spec: Box::new(spec),
                 is_gateway: false,
+                is_partial: false,
+                failed_ops: vec![],
             },
             Err(e) => SpecResult::Bail {
-
                 reason: format!("Swagger URL 실패: {e}"),
+                failed_ops: vec![],
             },
         };
     }
@@ -330,13 +367,15 @@ async fn fetch_single_spec(
     // ④ Pattern 3: Gateway API (select 있음 → AJAX)
     if let Some(ref info) = page_info {
         if !info.operations.is_empty() {
-            return fetch_gateway_spec(list_id, info, ajax_semaphore, ajax_delay_ms).await;
+            return fetch_gateway_spec(list_id, info, ajax_semaphore, ajax_delay_ms, timeout_secs)
+                .await;
         }
     }
 
     // ⑤ bail — 어떤 패턴에도 매칭 안 됨
     SpecResult::Bail {
         reason: "swaggerJson/swaggerUrl/Gateway 모두 없음".into(),
+        failed_ops: vec![],
     }
 }
 
@@ -345,19 +384,20 @@ async fn fetch_gateway_spec(
     page_info: &korea_cli::core::html_parser::PageInfo,
     ajax_semaphore: &tokio::sync::Semaphore,
     ajax_delay_ms: u64,
+    timeout_secs: u64,
 ) -> SpecResult {
     // API별 독립 Client 생성 (쿠키 격리)
     let ajax_client: reqwest::Client = match reqwest::Client::builder()
         .user_agent("korea-cli-builder/0.1.0")
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(timeout_secs))
         .cookie_store(true)
         .build()
     {
         Ok(c) => c,
         Err(e) => {
             return SpecResult::Bail {
-
                 reason: format!("AJAX client 생성 실패: {e}"),
+                failed_ops: vec![],
             }
         }
     };
@@ -369,6 +409,7 @@ async fn fetch_gateway_spec(
             if !resp.status().is_success() {
                 return SpecResult::Bail {
                     reason: format!("쿠키 획득 HTTP {}", resp.status()),
+                    failed_ops: vec![],
                 };
             }
             // 응답 본문 소비하여 연결 정리
@@ -376,8 +417,8 @@ async fn fetch_gateway_spec(
         }
         Err(e) => {
             return SpecResult::Bail {
-
                 reason: format!("쿠키 획득 실패: {e}"),
+                failed_ops: vec![],
             };
         }
     }
@@ -432,6 +473,7 @@ async fn fetch_gateway_spec(
     if parsed_ops.is_empty() {
         return SpecResult::Bail {
             reason: format!("Gateway AJAX 전부 실패 (0/{total_ops} ops)"),
+            failed_ops: vec![],
         };
     }
 
@@ -446,12 +488,15 @@ async fn fetch_gateway_spec(
         Some(spec) => SpecResult::Spec {
             spec: Box::new(spec),
             is_gateway: true,
+            is_partial: false,
+            failed_ops: vec![],
         },
         None => SpecResult::Bail {
             reason: format!(
                 "Gateway build_api_spec 실패 ({}/{total_ops} ops)",
                 parsed_ops.len()
             ),
+            failed_ops: vec![],
         },
     }
 }
@@ -477,6 +522,12 @@ fn parse_args() -> Result<BuildConfig> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(50);
 
+    let retry_stubs = get_arg(&args, "--retry-stubs");
+    let max_retry_time: u64 = get_arg(&args, "--max-retry-time")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(600);
+    let retry_timeout_secs: u64 = if retry_stubs.is_some() { 30 } else { 15 };
+
     Ok(BuildConfig {
         api_key,
         output,
@@ -484,6 +535,9 @@ fn parse_args() -> Result<BuildConfig> {
         delay_ms,
         ajax_concurrency,
         ajax_delay_ms,
+        retry_timeout_secs,
+        retry_stubs,
+        max_retry_time,
     })
 }
 

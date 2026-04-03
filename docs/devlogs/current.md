@@ -654,7 +654,32 @@ build_bundle.rs에 외부 URL 수집 단계 추가:
 
 ### 다음 작업
 
-- External API 외부 URL 수집 로직 구현 (build_bundle.rs 또는 별도 바이너리)
+- ~~External API 외부 URL 수집 로직 구현 (build_bundle.rs 또는 별도 바이너리)~~ ✓
 - bundle-gateway.zstd를 기본 번들로 교체
 - 쿠키 격리 필요 여부 검증
+- CI 수집 파이프라인
+
+---
+
+## 2026-04-03: External API endpoint_url 추출 구현
+
+### 완료
+
+- `html_parser.rs`: `PageInfo`에 `external_url: Option<String>` 필드 추가, `a.link-api-btn[href]` 셀렉터로 외부 포탈 URL 추출
+- `build_bundle.rs`: `SpecResult::ExternalLink` variant 추가, PRDE04 감지 시 외부 URL과 함께 반환
+- `build_bundle.rs`: `external_urls` HashMap으로 `CatalogEntry.endpoint_url` 오버라이드 — classify에도 방어적 전달
+- `Bail`에서 `is_link_api` 필드 제거 (PRDE04 경로가 ExternalLink로 이전됨)
+- `link_count` 별도 카운터 분리 (fail_count 오염 방지)
+- 단위 테스트 4개: 유효 href, 버튼 없음, javascript:void(0), &amp; 디코딩
+
+### 핵심 결정
+
+- **Bail에 필드 추가 vs ExternalLink variant**: 새 variant를 선택. 12곳+ bail 사이트에 보일러플레이트를 추가하는 것보다 의미론적으로 명확
+- **추가 네트워크 요청 없음**: build_bundle.rs가 이미 openapi.do 페이지를 fetch하는 시점에서 PRDE04를 감지하므로, 같은 HTML에서 URL을 추출하면 추가 요청 불필요
+
+### 다음 작업
+
+- 번들 리빌드하여 External API endpoint_url 커버리지 확인 (~93% 예상)
+- 카탈로그 문서 재생성 (gen-catalog-docs) — External 섹션에 실제 URL 표시
+- bundle-gateway.zstd를 기본 번들로 교체
 - CI 수집 파이프라인

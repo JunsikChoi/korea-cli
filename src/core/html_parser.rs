@@ -15,6 +15,8 @@ pub struct PageInfo {
     pub public_data_pk: Option<String>,
     pub ty_detail_code: Option<String>,
     pub operations: Vec<OperationOption>,
+    /// External portal URL extracted from `a.link-api-btn[href]` (LINK API only).
+    pub external_url: Option<String>,
 }
 
 /// A single operation option from the <select> dropdown.
@@ -47,11 +49,15 @@ pub fn parse_openapi_page(html: &str) -> Result<PageInfo> {
     // Extract operation list from <select id="open_api_detail_select">
     let operations = extract_operation_options(&document);
 
+    // Extract external portal URL from a.link-api-btn[href]
+    let external_url = extract_external_url(&document);
+
     Ok(PageInfo {
         public_data_detail_pk: pk,
         public_data_pk,
         ty_detail_code,
         operations,
+        external_url,
     })
 }
 
@@ -167,6 +173,16 @@ pub fn build_api_spec(list_id: &str, parsed_ops: &[ParsedOperation]) -> Option<A
 }
 
 // ── Internal helpers ──
+
+fn extract_external_url(document: &Html) -> Option<String> {
+    let sel = Selector::parse("a.link-api-btn").ok()?;
+    let href = document.select(&sel).next()?.value().attr("href")?.trim();
+    if href.starts_with("http") {
+        Some(href.to_string())
+    } else {
+        None
+    }
+}
 
 fn extract_public_data_detail_pk(document: &Html, raw_html: &str) -> Option<String> {
     // 1) id= 셀렉터 (실제 data.go.kr 구조)
@@ -790,5 +806,62 @@ mod tests {
         "#;
         let info = parse_openapi_page(html).unwrap();
         assert_eq!(info.ty_detail_code.as_deref(), Some("PRDE04"));
+    }
+
+    #[test]
+    fn test_external_url_valid_href() {
+        let html = r#"
+        <html><body>
+            <input type="hidden" id="publicDataDetailPk" value="uddi:ext-123">
+            <a class="link-api-btn" href="https://www.kma.go.kr/api/forecast">외부 링크</a>
+        </body></html>
+        "#;
+        let info = parse_openapi_page(html).unwrap();
+        assert_eq!(
+            info.external_url.as_deref(),
+            Some("https://www.kma.go.kr/api/forecast")
+        );
+    }
+
+    #[test]
+    fn test_external_url_no_link_api_btn() {
+        let html = r#"
+        <html><body>
+            <input type="hidden" id="publicDataDetailPk" value="uddi:no-ext">
+            <select id="open_api_detail_select">
+                <option value="1001">getWeather</option>
+            </select>
+        </body></html>
+        "#;
+        let info = parse_openapi_page(html).unwrap();
+        assert!(info.external_url.is_none());
+    }
+
+    #[test]
+    fn test_external_url_javascript_void_ignored() {
+        let html = r#"
+        <html><body>
+            <input type="hidden" id="publicDataDetailPk" value="uddi:js-void">
+            <a class="link-api-btn" href="javascript:void(0)">비활성 링크</a>
+        </body></html>
+        "#;
+        let info = parse_openapi_page(html).unwrap();
+        assert!(info.external_url.is_none());
+    }
+
+    #[test]
+    fn test_external_url_ampersand_decoded() {
+        // scraper (html5ever) auto-decodes &amp; → &
+        let html = r#"
+        <html><body>
+            <input type="hidden" id="publicDataDetailPk" value="uddi:amp-test">
+            <a class="link-api-btn" href="https://example.kr/api?a=1&amp;b=2">링크</a>
+        </body></html>
+        "#;
+        let info = parse_openapi_page(html).unwrap();
+        assert_eq!(
+            info.external_url.as_deref(),
+            Some("https://example.kr/api?a=1&b=2")
+        );
     }
 }

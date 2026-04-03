@@ -35,8 +35,10 @@ enum SpecResult {
         spec: Box<ApiSpec>,
         is_gateway: bool,
     },
-    /// 스펙 없음 — 분류 힌트와 bail 이유
-    Bail { is_link_api: bool, reason: String },
+    /// 스펙 없음 — bail 이유
+    Bail { reason: String },
+    /// LINK API (PRDE04) — 외부 포탈 URL 포함 가능
+    ExternalLink { url: Option<String> },
 }
 
 #[tokio::main]
@@ -59,6 +61,7 @@ async fn main() -> Result<()> {
     let mut specs: HashMap<String, ApiSpec> = HashMap::new();
     let mut skeleton_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut link_api_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut external_urls: HashMap<String, String> = HashMap::new();
 
     for (id, result) in all_results {
         match result {
@@ -69,10 +72,11 @@ async fn main() -> Result<()> {
                     specs.insert(id, *spec);
                 }
             }
-            SpecResult::Bail {
-                is_link_api: true, ..
-            } => {
-                link_api_ids.insert(id);
+            SpecResult::ExternalLink { url } => {
+                link_api_ids.insert(id.clone());
+                if let Some(u) = url {
+                    external_urls.insert(id, u);
+                }
             }
             SpecResult::Bail { .. } => {}
         }
@@ -85,16 +89,29 @@ async fn main() -> Result<()> {
         skeleton_ids.len(),
         link_api_ids.len(),
     );
+    if !link_api_ids.is_empty() {
+        eprintln!(
+            "  external_url: {}/{} LINK API ({:.0}%)",
+            external_urls.len(),
+            link_api_ids.len(),
+            (external_urls.len() as f64 / link_api_ids.len() as f64) * 100.0,
+        );
+    }
 
     // Step 3: ClassificationHints로 classify
     eprintln!("\n=== Step 3/4: 번들 구성 ===");
     let catalog: Vec<CatalogEntry> = services
         .iter()
         .map(|svc| {
+            let effective_url = external_urls
+                .get(&svc.list_id)
+                .cloned()
+                .unwrap_or_else(|| svc.endpoint_url.clone());
+
             let spec_status = SpecStatus::classify(&ClassificationHints {
                 has_spec: specs.contains_key(&svc.list_id),
                 is_skeleton: skeleton_ids.contains(&svc.list_id),
-                endpoint_url: &svc.endpoint_url,
+                endpoint_url: &effective_url,
                 is_link_api: link_api_ids.contains(&svc.list_id),
             });
             CatalogEntry {
@@ -105,7 +122,7 @@ async fn main() -> Result<()> {
                 org_name: svc.org_name.clone(),
                 category: svc.category.clone(),
                 request_count: svc.request_count,
-                endpoint_url: svc.endpoint_url.clone(),
+                endpoint_url: effective_url,
                 spec_status,
             }
         })
@@ -174,6 +191,7 @@ async fn collect_specs(services: &[ApiService], config: &BuildConfig) -> Vec<(St
     let success_count = Arc::new(AtomicUsize::new(0));
     let fail_count = Arc::new(AtomicUsize::new(0));
     let gateway_count = Arc::new(AtomicUsize::new(0));
+    let link_count = Arc::new(AtomicUsize::new(0));
     let total = services.len();
 
     let results: Vec<(String, SpecResult)> = stream::iter(services.iter())
@@ -186,6 +204,7 @@ async fn collect_specs(services: &[ApiService], config: &BuildConfig) -> Vec<(St
             let sc = success_count.clone();
             let fc = fail_count.clone();
             let gc = gateway_count.clone();
+            let lc = link_count.clone();
 
             async move {
                 let result = fetch_single_spec(&client, &list_id, &ajax_sem, ajax_delay_ms).await;
@@ -197,21 +216,29 @@ async fn collect_specs(services: &[ApiService], config: &BuildConfig) -> Vec<(St
                             gc.fetch_add(1, Ordering::Relaxed);
                         }
                     }
+                    SpecResult::ExternalLink { .. } => {
+                        lc.fetch_add(1, Ordering::Relaxed);
+                    }
                     SpecResult::Bail { reason, .. } => {
                         fc.fetch_add(1, Ordering::Relaxed);
-                        let done = sc.load(Ordering::Relaxed) + fc.load(Ordering::Relaxed);
+                        let done = sc.load(Ordering::Relaxed)
+                            + fc.load(Ordering::Relaxed)
+                            + lc.load(Ordering::Relaxed);
                         if done <= 20 || done.is_multiple_of(500) {
                             eprintln!("  SKIP {list_id}: {reason}");
                         }
                     }
                 }
 
-                let done = sc.load(Ordering::Relaxed) + fc.load(Ordering::Relaxed);
+                let done = sc.load(Ordering::Relaxed)
+                    + fc.load(Ordering::Relaxed)
+                    + lc.load(Ordering::Relaxed);
                 if done.is_multiple_of(500) {
                     eprintln!(
-                        "  진행: {done}/{total} ({} OK, {} FAIL, {} Gateway)",
+                        "  진행: {done}/{total} ({} OK, {} FAIL, {} Link, {} Gateway)",
                         sc.load(Ordering::Relaxed),
                         fc.load(Ordering::Relaxed),
+                        lc.load(Ordering::Relaxed),
                         gc.load(Ordering::Relaxed),
                     );
                 }
@@ -239,14 +266,13 @@ async fn fetch_single_spec(
             Ok(text) => text,
             Err(e) => {
                 return SpecResult::Bail {
-                    is_link_api: false,
                     reason: format!("페이지 본문 읽기 실패: {e}"),
                 }
             }
         },
         Err(e) => {
             return SpecResult::Bail {
-                is_link_api: false,
+
                 reason: format!("페이지 요청 실패: {e}"),
             }
         }
@@ -258,9 +284,8 @@ async fn fetch_single_spec(
         .ok();
     if let Some(ref info) = page_info {
         if info.ty_detail_code.as_deref() == Some("PRDE04") {
-            return SpecResult::Bail {
-                is_link_api: true,
-                reason: "LINK API (PRDE04)".into(),
+            return SpecResult::ExternalLink {
+                url: info.external_url.clone(),
             };
         }
     }
@@ -273,7 +298,7 @@ async fn fetch_single_spec(
                 is_gateway: false,
             },
             Err(e) => SpecResult::Bail {
-                is_link_api: false,
+
                 reason: format!("Swagger 파싱 실패: {e}"),
             },
         };
@@ -296,7 +321,7 @@ async fn fetch_single_spec(
                 is_gateway: false,
             },
             Err(e) => SpecResult::Bail {
-                is_link_api: false,
+
                 reason: format!("Swagger URL 실패: {e}"),
             },
         };
@@ -311,7 +336,6 @@ async fn fetch_single_spec(
 
     // ⑤ bail — 어떤 패턴에도 매칭 안 됨
     SpecResult::Bail {
-        is_link_api: false,
         reason: "swaggerJson/swaggerUrl/Gateway 모두 없음".into(),
     }
 }
@@ -332,7 +356,7 @@ async fn fetch_gateway_spec(
         Ok(c) => c,
         Err(e) => {
             return SpecResult::Bail {
-                is_link_api: false,
+
                 reason: format!("AJAX client 생성 실패: {e}"),
             }
         }
@@ -344,7 +368,6 @@ async fn fetch_gateway_spec(
         Ok(resp) => {
             if !resp.status().is_success() {
                 return SpecResult::Bail {
-                    is_link_api: false,
                     reason: format!("쿠키 획득 HTTP {}", resp.status()),
                 };
             }
@@ -353,7 +376,7 @@ async fn fetch_gateway_spec(
         }
         Err(e) => {
             return SpecResult::Bail {
-                is_link_api: false,
+
                 reason: format!("쿠키 획득 실패: {e}"),
             };
         }
@@ -408,7 +431,6 @@ async fn fetch_gateway_spec(
 
     if parsed_ops.is_empty() {
         return SpecResult::Bail {
-            is_link_api: false,
             reason: format!("Gateway AJAX 전부 실패 (0/{total_ops} ops)"),
         };
     }
@@ -426,7 +448,6 @@ async fn fetch_gateway_spec(
             is_gateway: true,
         },
         None => SpecResult::Bail {
-            is_link_api: false,
             reason: format!(
                 "Gateway build_api_spec 실패 ({}/{total_ops} ops)",
                 parsed_ops.len()

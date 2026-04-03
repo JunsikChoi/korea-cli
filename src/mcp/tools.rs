@@ -55,14 +55,22 @@ async fn handle_get_spec(args: serde_json::Value) -> anyhow::Result<serde_json::
     // Check for available spec
     if let Some(spec) = BUNDLE.specs.get(list_id) {
         let has_key = AppConfig::load()?.resolve_api_key().is_some();
+        let entry = BUNDLE.catalog.iter().find(|e| e.list_id == list_id);
+        let spec_status = entry.map_or(crate::core::types::SpecStatus::Available, |e| {
+            e.spec_status
+        });
+
         let mut output = serde_json::to_value(spec)?;
         if let Some(obj) = output.as_object_mut() {
             obj.insert("success".into(), json!(true));
             obj.insert(
                 "spec_status".into(),
-                serde_json::to_value(crate::core::types::SpecStatus::Available).unwrap(),
+                serde_json::to_value(spec_status).unwrap(),
             );
             obj.insert("has_api_key".into(), json!(has_key));
+            if spec_status == crate::core::types::SpecStatus::PartialStub {
+                obj.insert("partial_note".into(), json!(spec_status.user_message()));
+            }
             if !has_key {
                 obj.insert(
                     "key_guide".into(),

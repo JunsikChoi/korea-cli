@@ -433,6 +433,7 @@ async fn fetch_gateway_spec(
     let detail_pk = &page_info.public_data_detail_pk;
 
     let mut parsed_ops = Vec::new();
+    let mut failed_ops = Vec::new();
     let total_ops = page_info.operations.len();
 
     for op in &page_info.operations {
@@ -462,22 +463,61 @@ async fn fetch_gateway_spec(
             Ok(resp) => match resp.text().await {
                 Ok(html) => match parse_operation_detail(&html) {
                     Ok(detail) => parsed_ops.push(detail),
-                    Err(e) => eprintln!("  PARTIAL SKIP {list_id}/{}: parse: {e}", op.seq_no),
+                    Err(e) => {
+                        eprintln!("  PARTIAL SKIP {list_id}/{}: parse: {e}", op.seq_no);
+                        failed_ops.push(FailedOp {
+                            list_id: list_id.to_string(),
+                            seq_no: op.seq_no.clone(),
+                            op_name: op.name.clone(),
+                            error_type: ErrorType::ParseError,
+                            error_message: e.to_string(),
+                        });
+                    }
                 },
-                Err(e) => eprintln!("  PARTIAL SKIP {list_id}/{}: body: {e}", op.seq_no),
+                Err(e) => {
+                    eprintln!("  PARTIAL SKIP {list_id}/{}: body: {e}", op.seq_no);
+                    failed_ops.push(FailedOp {
+                        list_id: list_id.to_string(),
+                        seq_no: op.seq_no.clone(),
+                        op_name: op.name.clone(),
+                        error_type: ErrorType::BodyReadError,
+                        error_message: e.to_string(),
+                    });
+                }
             },
-            Err(e) => eprintln!("  PARTIAL SKIP {list_id}/{}: {e}", op.seq_no),
+            Err(e) => {
+                let error_type = if e.is_timeout() {
+                    ErrorType::NetworkTimeout
+                } else if e.is_status()
+                    && e.status() == Some(reqwest::StatusCode::TOO_MANY_REQUESTS)
+                {
+                    ErrorType::RateLimited
+                } else if e.is_connect() {
+                    ErrorType::ConnectionError
+                } else {
+                    ErrorType::NetworkTimeout
+                };
+                eprintln!("  PARTIAL SKIP {list_id}/{}: {e}", op.seq_no);
+                failed_ops.push(FailedOp {
+                    list_id: list_id.to_string(),
+                    seq_no: op.seq_no.clone(),
+                    op_name: op.name.clone(),
+                    error_type,
+                    error_message: e.to_string(),
+                });
+            }
         }
     }
 
     if parsed_ops.is_empty() {
         return SpecResult::Bail {
             reason: format!("Gateway AJAX 전부 실패 (0/{total_ops} ops)"),
-            failed_ops: vec![],
+            failed_ops,
         };
     }
 
-    if parsed_ops.len() < total_ops {
+    let is_partial = !failed_ops.is_empty();
+    if is_partial {
         eprintln!(
             "  PARTIAL: {}/{total_ops} operations ({list_id})",
             parsed_ops.len()
@@ -488,15 +528,15 @@ async fn fetch_gateway_spec(
         Some(spec) => SpecResult::Spec {
             spec: Box::new(spec),
             is_gateway: true,
-            is_partial: false,
-            failed_ops: vec![],
+            is_partial,
+            failed_ops,
         },
         None => SpecResult::Bail {
             reason: format!(
                 "Gateway build_api_spec 실패 ({}/{total_ops} ops)",
                 parsed_ops.len()
             ),
-            failed_ops: vec![],
+            failed_ops,
         },
     }
 }

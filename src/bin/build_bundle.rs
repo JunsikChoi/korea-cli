@@ -71,6 +71,11 @@ enum SpecResult {
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = parse_args()?;
+
+    if let Some(ref failed_ops_path) = config.retry_stubs {
+        return run_retry(&config, failed_ops_path).await;
+    }
+
     let start = Instant::now();
 
     // Step 1: Fetch catalog
@@ -623,6 +628,188 @@ fn get_arg(args: &[String], flag: &str) -> Option<String> {
         .position(|a| a == flag)
         .and_then(|i| args.get(i + 1))
         .cloned()
+}
+
+async fn run_retry(config: &BuildConfig, failed_ops_path: &str) -> Result<()> {
+    let start = Instant::now();
+    eprintln!("=== Retry: {} 읽기 ===", failed_ops_path);
+
+    // 1. failed_ops.json 읽기
+    let failed_json = std::fs::read_to_string(failed_ops_path)
+        .with_context(|| format!("failed_ops.json 읽기 실패: {}", failed_ops_path))?;
+    let failed_ops: Vec<FailedOp> = serde_json::from_str(&failed_json)?;
+
+    // ParseError는 재시도 불가 — 제외
+    let retryable: Vec<&FailedOp> = failed_ops
+        .iter()
+        .filter(|op| !matches!(op.error_type, ErrorType::ParseError))
+        .collect();
+
+    // 고유 list_id 추출
+    let mut retry_ids: Vec<String> = retryable
+        .iter()
+        .map(|op| op.list_id.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    retry_ids.sort();
+
+    eprintln!(
+        "  {} failed ops → {} retryable → {} unique list_ids",
+        failed_ops.len(),
+        retryable.len(),
+        retry_ids.len()
+    );
+
+    if retry_ids.is_empty() {
+        eprintln!("  재시도 대상 없음 (ParseError만 존재)");
+        return Ok(());
+    }
+
+    // 2. 기존 번들 로드
+    let bundle_bytes = std::fs::read(&config.output)
+        .with_context(|| format!("기존 번들 읽기 실패: {}", config.output))?;
+    let mut bundle_data: Bundle = bundle::decompress_and_deserialize(&bundle_bytes)?;
+
+    // 에러 타입별 최대 딜레이 결정
+    let has_rate_limited = retryable
+        .iter()
+        .any(|op| matches!(op.error_type, ErrorType::RateLimited));
+    let delays: &[u64] = if has_rate_limited {
+        &[60, 120, 300]
+    } else {
+        &[2, 8, 30]
+    };
+    let max_retries = 3usize;
+
+    // 3. list_id별 재수집
+    let retry_client = Arc::new(
+        reqwest::Client::builder()
+            .user_agent("korea-cli-builder/0.1.0")
+            .timeout(std::time::Duration::from_secs(config.retry_timeout_secs))
+            .build()?,
+    );
+    let ajax_semaphore = Arc::new(tokio::sync::Semaphore::new(config.ajax_concurrency));
+    let mut success_count = 0usize;
+    let mut still_partial = 0usize;
+
+    for (i, list_id) in retry_ids.iter().enumerate() {
+        if start.elapsed().as_secs() > config.max_retry_time {
+            let remaining = retry_ids.len() - i;
+            eprintln!(
+                "  MAX_RETRY_TIME({}s) 초과 — 남은 {} APIs skip",
+                config.max_retry_time, remaining
+            );
+            still_partial += remaining;
+            break;
+        }
+
+        eprintln!("  [{}/{}] retry: {}", i + 1, retry_ids.len(), list_id);
+
+        let mut succeeded = false;
+        for attempt in 0..max_retries {
+            let result = fetch_single_spec(
+                &retry_client,
+                list_id,
+                &ajax_semaphore,
+                config.ajax_delay_ms,
+                config.retry_timeout_secs,
+            )
+            .await;
+
+            match result {
+                SpecResult::Spec {
+                    spec, is_partial, ..
+                } => {
+                    if let Some(existing) = bundle_data.specs.get(list_id) {
+                        let merged = merge_operations(existing, &spec);
+                        bundle_data.specs.insert(list_id.clone(), merged);
+                    } else {
+                        bundle_data.specs.insert(list_id.clone(), *spec);
+                    }
+
+                    if is_partial {
+                        still_partial += 1;
+                        eprintln!("    여전히 부분 성공 (attempt {})", attempt + 1);
+                    } else {
+                        succeeded = true;
+                        success_count += 1;
+                        eprintln!("    완전 성공!");
+                    }
+                    break;
+                }
+                SpecResult::Bail { ref reason, .. } => {
+                    if attempt < max_retries - 1 {
+                        let delay = delays.get(attempt).copied().unwrap_or(30);
+                        eprintln!(
+                            "    attempt {}: {} — {}s 대기",
+                            attempt + 1,
+                            reason,
+                            delay
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                    } else {
+                        eprintln!("    {}회 시도 실패: {}", max_retries, reason);
+                        still_partial += 1;
+                    }
+                }
+                SpecResult::ExternalLink { .. } => {
+                    eprintln!("    LINK API — skip");
+                    break;
+                }
+            }
+        }
+
+        // list_id 간 딜레이 — rate limit 재발 방지
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        // catalog에서 PartialStub → Available 승격 (완전 성공 시)
+        if succeeded {
+            if let Some(entry) = bundle_data
+                .catalog
+                .iter_mut()
+                .find(|e| e.list_id == *list_id)
+            {
+                entry.spec_status = SpecStatus::Available;
+            }
+        }
+    }
+
+    // 4. 메타데이터 갱신 + 번들 재직렬화 + 저장
+    bundle_data.metadata.spec_count = bundle_data.specs.len();
+    bundle_data.metadata.checksum = format!(
+        "{:x}",
+        md5_hash(&format!(
+            "{}-{}",
+            bundle_data.metadata.api_count, bundle_data.metadata.spec_count
+        ))
+    );
+    let compressed = bundle::serialize_and_compress(&bundle_data, 3)?;
+    std::fs::write(&config.output, &compressed)?;
+
+    let elapsed = start.elapsed();
+    eprintln!("\n=== Retry 완료 ===");
+    eprintln!("  성공: {}/{}", success_count, retry_ids.len());
+    eprintln!("  여전히 partial: {}", still_partial);
+    eprintln!("  소요: {:.1}초", elapsed.as_secs_f64());
+
+    Ok(())
+}
+
+/// 기존 spec의 operation + retry 결과의 operation을 합집합
+/// path + method 쌍으로 identity를 판별
+fn merge_operations(existing: &ApiSpec, new_spec: &ApiSpec) -> ApiSpec {
+    let mut merged = new_spec.clone();
+    for existing_op in &existing.operations {
+        let dominated = merged.operations.iter().any(|op| {
+            op.path == existing_op.path
+                && std::mem::discriminant(&op.method) == std::mem::discriminant(&existing_op.method)
+        });
+        if !dominated {
+            merged.operations.push(existing_op.clone());
+        }
+    }
+    merged
 }
 
 /// Simple hash for checksum (not cryptographic, just for version tracking).

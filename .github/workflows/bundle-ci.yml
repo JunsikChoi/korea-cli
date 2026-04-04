@@ -86,13 +86,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet docs/api-catalog/; then
+          git add docs/api-catalog/
+          if git diff --cached --quiet; then
             echo "문서 변경 없음"
           else
-            git pull --rebase origin main
-            git add docs/api-catalog/
             DATE=$(date +%Y-%m-%d)
             git commit -m "docs: 카탈로그 문서 자동 업데이트 ($DATE)"
+            git pull --rebase origin main
             git push
           fi
 

@@ -27,9 +27,8 @@ pub async fn run(list_id: &str, operation: &str, params: &[(String, String)]) ->
 
     // PartialStub 안내: spec이 있지만 요청한 operation이 없을 수 있음
     let entry = BUNDLE.catalog.iter().find(|e| e.list_id == list_id);
-    let is_partial = entry.map_or(false, |e| {
-        e.spec_status == crate::core::types::SpecStatus::PartialStub
-    });
+    let is_partial =
+        entry.is_some_and(|e| e.spec_status == crate::core::types::SpecStatus::PartialStub);
 
     let spec = BUNDLE.specs.get(list_id).unwrap();
 

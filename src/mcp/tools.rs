@@ -56,9 +56,8 @@ async fn handle_get_spec(args: serde_json::Value) -> anyhow::Result<serde_json::
     if let Some(spec) = BUNDLE.specs.get(list_id) {
         let has_key = AppConfig::load()?.resolve_api_key().is_some();
         let entry = BUNDLE.catalog.iter().find(|e| e.list_id == list_id);
-        let spec_status = entry.map_or(crate::core::types::SpecStatus::Available, |e| {
-            e.spec_status
-        });
+        let spec_status =
+            entry.map_or(crate::core::types::SpecStatus::Available, |e| e.spec_status);
 
         let mut output = serde_json::to_value(spec)?;
         if let Some(obj) = output.as_object_mut() {

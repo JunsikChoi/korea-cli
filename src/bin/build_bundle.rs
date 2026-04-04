@@ -741,12 +741,7 @@ async fn run_retry(config: &BuildConfig, failed_ops_path: &str) -> Result<()> {
                 SpecResult::Bail { ref reason, .. } => {
                     if attempt < max_retries - 1 {
                         let delay = delays.get(attempt).copied().unwrap_or(30);
-                        eprintln!(
-                            "    attempt {}: {} — {}s 대기",
-                            attempt + 1,
-                            reason,
-                            delay
-                        );
+                        eprintln!("    attempt {}: {} — {}s 대기", attempt + 1, reason, delay);
                         tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                     } else {
                         eprintln!("    {}회 시도 실패: {}", max_retries, reason);

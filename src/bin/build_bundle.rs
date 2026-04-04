@@ -732,6 +732,14 @@ async fn run_retry(config: &BuildConfig, failed_ops_path: &str) -> Result<()> {
 
                     if is_partial {
                         still_partial += 1;
+                        // catalog status도 PartialStub으로 승격 (Bail→PartialStub 전환 대응)
+                        if let Some(entry) = bundle_data
+                            .catalog
+                            .iter_mut()
+                            .find(|e| e.list_id == *list_id)
+                        {
+                            entry.spec_status = SpecStatus::PartialStub;
+                        }
                         eprintln!("    여전히 부분 성공 (attempt {})", attempt + 1);
                     } else {
                         succeeded = true;
@@ -782,7 +790,10 @@ async fn run_retry(config: &BuildConfig, failed_ops_path: &str) -> Result<()> {
         ))
     );
     let compressed = bundle::serialize_and_compress(&bundle_data, 3)?;
-    std::fs::write(&config.output, &compressed)?;
+    let output_path = std::path::Path::new(&config.output);
+    let tmp_path = output_path.with_extension("zstd.tmp");
+    std::fs::write(&tmp_path, &compressed)?;
+    std::fs::rename(&tmp_path, output_path)?;
 
     let elapsed = start.elapsed();
     eprintln!("\n=== Retry 완료 ===");

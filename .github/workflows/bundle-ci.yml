@@ -19,7 +19,7 @@ env:
 jobs:
   build-bundle:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
 
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +34,7 @@ jobs:
 
       - name: 번들 수집
         id: collect
-        run: ./target/release/build-bundle --output $BUNDLE_PATH
+        run: ./target/release/build-bundle --output $BUNDLE_PATH --concurrency 10 --delay 50
         env:
           DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
 
@@ -45,7 +45,7 @@ jobs:
             ./target/release/build-bundle \
               --output $BUNDLE_PATH \
               --retry-stubs data/failed_ops.json \
-              --max-retry-time 600
+              --max-retry-time 900
           else
             echo "failed_ops.json 없음 또는 비어있음 — retry skip"
           fi

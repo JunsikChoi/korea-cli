@@ -24,12 +24,16 @@ src/
 ├── config/        # 설정 관리 (~/.config/korea-cli/config.toml)
 ├── cli/           # CLI 서브커맨드 핸들러
 └── bin/
-    ├── build_bundle.rs  # 번들 생성 도구 (Swagger + Gateway AJAX 추출)
+    ├── build_bundle.rs  # 번들 생성 도구 (Swagger + Gateway AJAX 추출 + --retry-stubs)
     ├── survey.rs        # API 커버리지 서베이
     ├── html_survey.rs   # HTML 구조 서베이
     ├── crawl_pages.rs   # openapi.do 페이지 크롤러
     ├── analyze_pages.rs # HTML 구조 신호 추출기
-    └── summarize_signals.rs # 신호 빈도 분석 + 클러스터링
+    ├── summarize_signals.rs # 신호 빈도 분석 + 클러스터링
+    └── gen_catalog_docs.rs  # API 카탈로그 markdown 문서 생성
+.github/
+└── workflows/
+    └── bundle-ci.yml    # 주 1회 번들 수집 + retry + Release 배포
 ```
 
 ## 코딩 컨벤션

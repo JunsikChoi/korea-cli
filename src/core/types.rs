@@ -40,7 +40,7 @@ pub struct OperationSummary {
 
 /// Current bundle schema version. Increment when Bundle/CatalogEntry fields change.
 /// New variant in SpecStatus must be appended at the end (postcard varint ordering).
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bundle {
@@ -68,6 +68,7 @@ pub enum SpecStatus {
     External,
     CatalogOnly,
     Unsupported,
+    PartialStub, // 반드시 끝에 — postcard varint 순서 보존
 }
 
 /// classify 함수의 입력 — named fields로 인자 순서 혼동 방지
@@ -77,11 +78,12 @@ pub struct ClassificationHints<'a> {
     pub is_skeleton: bool,
     pub endpoint_url: &'a str,
     pub is_link_api: bool,
+    pub is_partial: bool,
 }
 
 impl SpecStatus {
     pub fn is_callable(&self) -> bool {
-        matches!(self, Self::Available)
+        matches!(self, Self::Available | Self::PartialStub)
     }
 
     pub fn user_message(&self) -> &'static str {
@@ -92,6 +94,7 @@ impl SpecStatus {
             Self::External => "외부 포탈에서 제공하는 API입니다.",
             Self::CatalogOnly => "카탈로그 정보만 있습니다.",
             Self::Unsupported => "REST가 아닌 프로토콜(WMS/WFS 등)입니다.",
+            Self::PartialStub => "일부 operation만 수집됨 — 존재하는 operation은 호출 가능, 누락분은 다음 업데이트에서 복구 예정",
         }
     }
 
@@ -99,6 +102,9 @@ impl SpecStatus {
     pub fn classify(hints: &ClassificationHints) -> Self {
         if hints.is_link_api {
             return Self::External;
+        }
+        if hints.is_partial && hints.has_spec {
+            return Self::PartialStub;
         }
         if hints.has_spec {
             return Self::Available;
@@ -338,6 +344,7 @@ mod tests {
     #[test]
     fn test_spec_status_is_callable() {
         assert!(SpecStatus::Available.is_callable());
+        assert!(SpecStatus::PartialStub.is_callable());
         assert!(!SpecStatus::Skeleton.is_callable());
         assert!(!SpecStatus::HtmlOnly.is_callable());
         assert!(!SpecStatus::External.is_callable());
@@ -362,6 +369,7 @@ mod tests {
             SpecStatus::External,
             SpecStatus::CatalogOnly,
             SpecStatus::Unsupported,
+            SpecStatus::PartialStub,
         ];
         for status in &statuses {
             let bytes = postcard::to_allocvec(status).unwrap();
@@ -544,5 +552,60 @@ mod tests {
             }),
             SpecStatus::External,
         );
+    }
+
+    #[test]
+    fn test_partial_stub_is_callable() {
+        assert!(SpecStatus::PartialStub.is_callable());
+    }
+
+    #[test]
+    fn test_partial_stub_user_message() {
+        let msg = SpecStatus::PartialStub.user_message();
+        assert!(msg.contains("일부"));
+        assert!(msg.contains("operation"));
+    }
+
+    #[test]
+    fn test_classify_partial_stub() {
+        assert_eq!(
+            SpecStatus::classify(&ClassificationHints {
+                has_spec: true,
+                is_partial: true,
+                endpoint_url: "https://apis.data.go.kr/x",
+                ..Default::default()
+            }),
+            SpecStatus::PartialStub,
+        );
+    }
+
+    #[test]
+    fn test_classify_partial_stub_link_api_takes_priority() {
+        // LINK API는 is_partial보다 우선
+        assert_eq!(
+            SpecStatus::classify(&ClassificationHints {
+                has_spec: true,
+                is_partial: true,
+                is_link_api: true,
+                endpoint_url: "https://apis.data.go.kr/x",
+                ..Default::default()
+            }),
+            SpecStatus::External,
+        );
+    }
+
+    #[test]
+    fn test_partial_stub_postcard_roundtrip() {
+        let status = SpecStatus::PartialStub;
+        let bytes = postcard::to_allocvec(&status).unwrap();
+        let decoded: SpecStatus = postcard::from_bytes(&bytes).unwrap();
+        assert_eq!(decoded, status);
+    }
+
+    #[test]
+    fn test_partial_stub_postcard_index() {
+        // PartialStub은 variant index 6이어야 함 (0-indexed, 끝에 추가)
+        let bytes = postcard::to_allocvec(&SpecStatus::PartialStub).unwrap();
+        assert_eq!(bytes[0], 6);
     }
 }

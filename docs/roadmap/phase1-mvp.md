@@ -79,10 +79,12 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 - [x] 번들 리빌드 + 커버리지 검증 — Available 7,160개 (59.1%), 목표 53.5% 초과 달성
 - [ ] AJAX 부분 성공 662건 추가 파싱 (서비스URL 기반)
 
-### 3. CI 수집 파이프라인
-- [ ] GitHub Actions 크론으로 Swagger + HTML AJAX 전체 수집
-- [ ] 변경 감지 + 새 번들 생성 → GitHub Releases 배포
-- [ ] `korea-cli update`가 Releases에서 최신 번들 다운로드
+### 3. CI 수집 파이프라인 ✅
+- [x] GitHub Actions 크론으로 Swagger + HTML AJAX 전체 수집 (`.github/workflows/bundle-ci.yml`)
+- [x] 변경 감지 + 새 번들 생성 → GitHub Releases 배포 (sha256sum 비교, `bundle-{date}-{run}` 태그)
+- [x] `korea-cli update`가 Releases에서 최신 번들 다운로드 (schema_version 검증 + atomic 교체)
+- [x] PartialStub 분류 — 부분 성공 Gateway API 명시 분류 + failed_ops.json 출력
+- [x] `--retry-stubs` 재수집 플래그 — failed_ops.json 기반 list_id 단위 retry + operation merge
 
 ### 4. 호출 엔진 개선
 - [ ] XML 응답 파싱 지원 (현재 JSON만 처리)

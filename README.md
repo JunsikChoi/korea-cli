@@ -193,6 +193,8 @@ korea-cli/
 | [HTML 스펙 전수조사](data/html-survey-report.md) | HTML 폴백 경로 전수조사 — 커버리지 32.6%→53.5% |
 | [Gateway 스펙 추출 설계](docs/specs/2026-04-02-gateway-spec-extraction-design.md) | Gateway API AJAX 추출 아키텍처 |
 | [Gateway 스펙 추출 플랜](docs/plans/2026-04-02-gateway-spec-extraction-plan.md) | 구현 태스크 (TDD 기반) |
+| [PartialStub + CI 설계](docs/specs/2026-04-04-partial-stub-and-ci-pipeline-design.md) | 부분 수집 분류 + CI 자동화 아키텍처 |
+| [PartialStub + CI 플랜](docs/plans/2026-04-04-partial-stub-and-ci-pipeline.md) | 구현 태스크 (TDD 기반) |
 
 ## 로드맵
 

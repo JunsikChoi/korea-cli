@@ -25,6 +25,30 @@ pub async fn run(list_id: &str, operation: &str, params: &[(String, String)]) ->
         return Ok(());
     }
 
+    // PartialStub 안내: spec이 있지만 요청한 operation이 없을 수 있음
+    let entry = BUNDLE.catalog.iter().find(|e| e.list_id == list_id);
+    let is_partial =
+        entry.is_some_and(|e| e.spec_status == crate::core::types::SpecStatus::PartialStub);
+
+    let spec = BUNDLE.specs.get(list_id).unwrap();
+
+    // 요청한 operation이 spec에 없고 PartialStub이면 안내
+    let has_operation = spec
+        .operations
+        .iter()
+        .any(|op| op.path == operation || op.summary == operation);
+    if !has_operation && is_partial {
+        let response = serde_json::json!({
+            "success": false,
+            "list_id": list_id,
+            "spec_status": "PartialStub",
+            "message": "이 API는 일부 operation만 수집됨 — `korea-cli update`로 최신 번들을 받으면 추가 operation이 포함될 수 있습니다",
+            "available_operations": spec.operations.iter().map(|op| &op.path).collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&response)?);
+        return Ok(());
+    }
+
     let cfg = AppConfig::load()?;
     let api_key = match cfg.resolve_api_key() {
         Some(key) => key,
@@ -40,7 +64,6 @@ pub async fn run(list_id: &str, operation: &str, params: &[(String, String)]) ->
         }
     };
 
-    let spec = BUNDLE.specs.get(list_id).unwrap();
     let result = caller::call_api(spec, operation, params, &api_key).await?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())

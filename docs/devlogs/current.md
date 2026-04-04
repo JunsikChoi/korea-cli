@@ -679,7 +679,52 @@ build_bundle.rs에 외부 URL 수집 단계 추가:
 
 ### 다음 작업
 
-- 번들 리빌드하여 External API endpoint_url 커버리지 확인 (~93% 예상)
-- 카탈로그 문서 재생성 (gen-catalog-docs) — External 섹션에 실제 URL 표시
+- ~~번들 리빌드하여 External API endpoint_url 커버리지 확인~~ ✓ (이전 세션에서 완료)
+- ~~카탈로그 문서 재생성~~ ✓
 - bundle-gateway.zstd를 기본 번들로 교체
-- CI 수집 파이프라인
+- ~~CI 수집 파이프라인~~ ✓
+
+---
+
+## 2026-04-04: PartialStub + CI 수집 파이프라인 구현
+
+### 배경
+
+Gateway API AJAX 추출에서 부분 성공(일부 operation만 성공)하는 케이스가 존재했으나, 기존 분류에서는 Available과 동일하게 취급하거나 Bail로 버려졌다. 부분 성공을 명시적으로 분류하고, 실패분을 자동 재수집하며, CI 크론으로 전체 파이프라인을 자동화하는 것이 목표.
+
+### 완료
+
+- `SpecStatus::PartialStub` variant 추가 (postcard varint 끝에, schema v2→v3)
+- `ClassificationHints`에 `is_partial` 필드 추가, `classify()`에서 `is_partial && has_spec` → PartialStub
+- `FailedOp`/`ErrorType` 타입 — AJAX 실패를 NetworkTimeout/RateLimited/BodyReadError/ParseError/ConnectionError로 분류
+- `SpecResult`에 `is_partial`, `failed_ops` 필드 추가
+- `fetch_gateway_spec`에서 실패 operation을 FailedOp으로 수집 + is_partial 감지
+- main()에서 partial_ids 추적 + `data/failed_ops.json` 출력
+- `--retry-stubs` 플래그: failed_ops.json 기반 재수집 + operation merge (기존 spec base, 신규 operation 추가)
+- CLI/MCP에서 PartialStub 안내 메시지 (누락 operation 시 available_operations 반환)
+- `update.rs`에 schema_version 검증 + atomic 파일 교체 (tmp → rename)
+- `.github/workflows/bundle-ci.yml` — 주 1회 크론 (UTC 토 17:00), 수집 → retry → 변경 감지 → 문서 업데이트 → Release
+- 번들 저장 atomic 화 (main + run_retry 모두 tmp → rename)
+- 6개 신규 PartialStub 테스트, 전체 테스트 통과
+
+### 핵심 결정
+
+- **PartialStub은 is_callable()=true**: 존재하는 operation은 호출 가능. 누락된 operation만 다음 업데이트에서 복구
+- **classify()에서 `is_partial && has_spec` 조건**: has_spec 없이 is_partial만으로 PartialStub이 되는 것 방지 (pub API 방어)
+- **merge_operations base를 existing으로**: retry 시 기존 메타데이터(auth, base_url 등) 보존. 새 operation만 추가
+- **ParseError는 retry 불가**: failed_ops.json에서 ParseError 타입은 필터링하여 재시도하지 않음 (서버 HTML 구조 문제)
+- **retry에서 PartialStub → catalog status 승격**: Bail이었던 API가 retry에서 PartialStub Spec으로 바뀌면 catalog도 PartialStub으로 업데이트
+
+### Eval 결과
+
+- 3명 전문가 병렬 검증 (architect-reviewer, backend-architect, deployment-engineer)
+- Round 1: BLOCK 2건 + WARNING 6건 수정
+- Round 2: Codex 교차검증 — BLOCK 2건 추가 발견 + 수정
+- 최종: BLOCK 0건, WARNING 3건 미반영 (대규모 변경 필요)
+
+### 다음 작업
+
+- bundle-gateway.zstd를 기본 번들로 교체 (v3 schema로 재빌드)
+- gen_catalog_docs에서 PartialStub을 Available 섹션에 포함 (현재 "기타" 분류)
+- DATA_GO_KR_API_KEY GitHub secret 설정 후 CI 첫 실행
+- E2E 테스트: 실제 PartialStub API에서 available operation 호출 확인

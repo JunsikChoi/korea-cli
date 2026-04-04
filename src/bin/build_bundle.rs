@@ -4,8 +4,9 @@
 //!
 //! Estimated time: ~15-20 minutes for 12K APIs with concurrency=5.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::stream::{self, StreamExt};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -25,6 +26,27 @@ struct BuildConfig {
     delay_ms: u64,
     ajax_concurrency: usize,
     ajax_delay_ms: u64,
+    retry_timeout_secs: u64,
+    retry_stubs: Option<String>,
+    max_retry_time: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum ErrorType {
+    NetworkTimeout,
+    RateLimited,
+    BodyReadError,
+    ParseError,
+    ConnectionError,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FailedOp {
+    list_id: String,
+    seq_no: String,
+    op_name: String,
+    error_type: ErrorType,
+    error_message: String,
 }
 
 /// fetch_single_spec 결과 — 스펙 또는 분류 힌트
@@ -34,9 +56,14 @@ enum SpecResult {
     Spec {
         spec: Box<ApiSpec>,
         is_gateway: bool,
+        is_partial: bool,
+        failed_ops: Vec<FailedOp>,
     },
     /// 스펙 없음 — bail 이유
-    Bail { reason: String },
+    Bail {
+        reason: String,
+        failed_ops: Vec<FailedOp>,
+    },
     /// LINK API (PRDE04) — 외부 포탈 URL 포함 가능
     ExternalLink { url: Option<String> },
 }
@@ -44,6 +71,11 @@ enum SpecResult {
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = parse_args()?;
+
+    if let Some(ref failed_ops_path) = config.retry_stubs {
+        return run_retry(&config, failed_ops_path).await;
+    }
+
     let start = Instant::now();
 
     // Step 1: Fetch catalog
@@ -62,13 +94,29 @@ async fn main() -> Result<()> {
     let mut skeleton_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut link_api_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut external_urls: HashMap<String, String> = HashMap::new();
+    let mut partial_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut all_failed_ops: Vec<FailedOp> = Vec::new();
 
     for (id, result) in all_results {
         match result {
-            SpecResult::Spec { spec, .. } => {
+            SpecResult::Spec {
+                spec,
+                is_partial,
+                failed_ops,
+                ..
+            } => {
+                if is_partial {
+                    all_failed_ops.extend(failed_ops);
+                }
                 if spec.operations.is_empty() {
-                    skeleton_ids.insert(id);
+                    // partial이지만 operation 0개 → Bail과 동일 취급 (partial_ids에 넣지 않음)
+                    if !is_partial {
+                        skeleton_ids.insert(id);
+                    }
                 } else {
+                    if is_partial {
+                        partial_ids.insert(id.clone());
+                    }
                     specs.insert(id, *spec);
                 }
             }
@@ -78,7 +126,9 @@ async fn main() -> Result<()> {
                     external_urls.insert(id, u);
                 }
             }
-            SpecResult::Bail { .. } => {}
+            SpecResult::Bail { failed_ops, .. } => {
+                all_failed_ops.extend(failed_ops);
+            }
         }
     }
     eprintln!(
@@ -97,6 +147,13 @@ async fn main() -> Result<()> {
             (external_urls.len() as f64 / link_api_ids.len() as f64) * 100.0,
         );
     }
+    if !partial_ids.is_empty() {
+        eprintln!(
+            "  partial: {} APIs ({} failed ops)",
+            partial_ids.len(),
+            all_failed_ops.len()
+        );
+    }
 
     // Step 3: ClassificationHints로 classify
     eprintln!("\n=== Step 3/4: 번들 구성 ===");
@@ -113,6 +170,7 @@ async fn main() -> Result<()> {
                 is_skeleton: skeleton_ids.contains(&svc.list_id),
                 endpoint_url: &effective_url,
                 is_link_api: link_api_ids.contains(&svc.list_id),
+                is_partial: partial_ids.contains(&svc.list_id),
             });
             CatalogEntry {
                 list_id: svc.list_id.clone(),
@@ -153,16 +211,30 @@ async fn main() -> Result<()> {
         specs,
     };
 
+    // failed_ops.json 출력
+    if !all_failed_ops.is_empty() {
+        let failed_ops_path = std::path::Path::new(&config.output)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("failed_ops.json");
+        let failed_json = serde_json::to_string_pretty(&all_failed_ops)?;
+        std::fs::write(&failed_ops_path, &failed_json)?;
+        eprintln!(
+            "  failed_ops: {} → {}",
+            all_failed_ops.len(),
+            failed_ops_path.display()
+        );
+    }
+
     // Step 4: Serialize + compress
     eprintln!("\n=== Step 4/4: 직렬화 + 압축 ===");
     let compressed = bundle::serialize_and_compress(&bundle_data, 3)?;
 
-    std::fs::create_dir_all(
-        std::path::Path::new(&config.output)
-            .parent()
-            .unwrap_or(std::path::Path::new(".")),
-    )?;
-    std::fs::write(&config.output, &compressed)?;
+    let output_path = std::path::Path::new(&config.output);
+    std::fs::create_dir_all(output_path.parent().unwrap_or(std::path::Path::new(".")))?;
+    let tmp_path = output_path.with_extension("zstd.tmp");
+    std::fs::write(&tmp_path, &compressed)?;
+    std::fs::rename(&tmp_path, output_path)?;
 
     let elapsed = start.elapsed();
     eprintln!("\n=== 완료 ===");
@@ -200,6 +272,7 @@ async fn collect_specs(services: &[ApiService], config: &BuildConfig) -> Vec<(St
             let list_id = svc.list_id.clone();
             let delay_ms = config.delay_ms;
             let ajax_delay_ms = config.ajax_delay_ms;
+            let timeout_secs = config.retry_timeout_secs;
             let ajax_sem = ajax_semaphore.clone();
             let sc = success_count.clone();
             let fc = fail_count.clone();
@@ -207,7 +280,9 @@ async fn collect_specs(services: &[ApiService], config: &BuildConfig) -> Vec<(St
             let lc = link_count.clone();
 
             async move {
-                let result = fetch_single_spec(&client, &list_id, &ajax_sem, ajax_delay_ms).await;
+                let result =
+                    fetch_single_spec(&client, &list_id, &ajax_sem, ajax_delay_ms, timeout_secs)
+                        .await;
 
                 match &result {
                     SpecResult::Spec { is_gateway, .. } => {
@@ -219,7 +294,7 @@ async fn collect_specs(services: &[ApiService], config: &BuildConfig) -> Vec<(St
                     SpecResult::ExternalLink { .. } => {
                         lc.fetch_add(1, Ordering::Relaxed);
                     }
-                    SpecResult::Bail { reason, .. } => {
+                    SpecResult::Bail { ref reason, .. } => {
                         fc.fetch_add(1, Ordering::Relaxed);
                         let done = sc.load(Ordering::Relaxed)
                             + fc.load(Ordering::Relaxed)
@@ -259,6 +334,7 @@ async fn fetch_single_spec(
     list_id: &str,
     ajax_semaphore: &tokio::sync::Semaphore,
     ajax_delay_ms: u64,
+    timeout_secs: u64,
 ) -> SpecResult {
     let page_url = format!("https://www.data.go.kr/data/{list_id}/openapi.do");
     let html = match client.get(&page_url).send().await {
@@ -267,13 +343,14 @@ async fn fetch_single_spec(
             Err(e) => {
                 return SpecResult::Bail {
                     reason: format!("페이지 본문 읽기 실패: {e}"),
+                    failed_ops: vec![],
                 }
             }
         },
         Err(e) => {
             return SpecResult::Bail {
-
                 reason: format!("페이지 요청 실패: {e}"),
+                failed_ops: vec![],
             }
         }
     };
@@ -296,10 +373,12 @@ async fn fetch_single_spec(
             Ok(spec) => SpecResult::Spec {
                 spec: Box::new(spec),
                 is_gateway: false,
+                is_partial: false,
+                failed_ops: vec![],
             },
             Err(e) => SpecResult::Bail {
-
                 reason: format!("Swagger 파싱 실패: {e}"),
+                failed_ops: vec![],
             },
         };
     }
@@ -319,10 +398,12 @@ async fn fetch_single_spec(
             Ok(spec) => SpecResult::Spec {
                 spec: Box::new(spec),
                 is_gateway: false,
+                is_partial: false,
+                failed_ops: vec![],
             },
             Err(e) => SpecResult::Bail {
-
                 reason: format!("Swagger URL 실패: {e}"),
+                failed_ops: vec![],
             },
         };
     }
@@ -330,13 +411,15 @@ async fn fetch_single_spec(
     // ④ Pattern 3: Gateway API (select 있음 → AJAX)
     if let Some(ref info) = page_info {
         if !info.operations.is_empty() {
-            return fetch_gateway_spec(list_id, info, ajax_semaphore, ajax_delay_ms).await;
+            return fetch_gateway_spec(list_id, info, ajax_semaphore, ajax_delay_ms, timeout_secs)
+                .await;
         }
     }
 
     // ⑤ bail — 어떤 패턴에도 매칭 안 됨
     SpecResult::Bail {
         reason: "swaggerJson/swaggerUrl/Gateway 모두 없음".into(),
+        failed_ops: vec![],
     }
 }
 
@@ -345,19 +428,20 @@ async fn fetch_gateway_spec(
     page_info: &korea_cli::core::html_parser::PageInfo,
     ajax_semaphore: &tokio::sync::Semaphore,
     ajax_delay_ms: u64,
+    timeout_secs: u64,
 ) -> SpecResult {
     // API별 독립 Client 생성 (쿠키 격리)
     let ajax_client: reqwest::Client = match reqwest::Client::builder()
         .user_agent("korea-cli-builder/0.1.0")
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(timeout_secs))
         .cookie_store(true)
         .build()
     {
         Ok(c) => c,
         Err(e) => {
             return SpecResult::Bail {
-
                 reason: format!("AJAX client 생성 실패: {e}"),
+                failed_ops: vec![],
             }
         }
     };
@@ -369,6 +453,7 @@ async fn fetch_gateway_spec(
             if !resp.status().is_success() {
                 return SpecResult::Bail {
                     reason: format!("쿠키 획득 HTTP {}", resp.status()),
+                    failed_ops: vec![],
                 };
             }
             // 응답 본문 소비하여 연결 정리
@@ -376,8 +461,8 @@ async fn fetch_gateway_spec(
         }
         Err(e) => {
             return SpecResult::Bail {
-
                 reason: format!("쿠키 획득 실패: {e}"),
+                failed_ops: vec![],
             };
         }
     }
@@ -392,6 +477,7 @@ async fn fetch_gateway_spec(
     let detail_pk = &page_info.public_data_detail_pk;
 
     let mut parsed_ops = Vec::new();
+    let mut failed_ops = Vec::new();
     let total_ops = page_info.operations.len();
 
     for op in &page_info.operations {
@@ -421,21 +507,61 @@ async fn fetch_gateway_spec(
             Ok(resp) => match resp.text().await {
                 Ok(html) => match parse_operation_detail(&html) {
                     Ok(detail) => parsed_ops.push(detail),
-                    Err(e) => eprintln!("  PARTIAL SKIP {list_id}/{}: parse: {e}", op.seq_no),
+                    Err(e) => {
+                        eprintln!("  PARTIAL SKIP {list_id}/{}: parse: {e}", op.seq_no);
+                        failed_ops.push(FailedOp {
+                            list_id: list_id.to_string(),
+                            seq_no: op.seq_no.clone(),
+                            op_name: op.name.clone(),
+                            error_type: ErrorType::ParseError,
+                            error_message: e.to_string(),
+                        });
+                    }
                 },
-                Err(e) => eprintln!("  PARTIAL SKIP {list_id}/{}: body: {e}", op.seq_no),
+                Err(e) => {
+                    eprintln!("  PARTIAL SKIP {list_id}/{}: body: {e}", op.seq_no);
+                    failed_ops.push(FailedOp {
+                        list_id: list_id.to_string(),
+                        seq_no: op.seq_no.clone(),
+                        op_name: op.name.clone(),
+                        error_type: ErrorType::BodyReadError,
+                        error_message: e.to_string(),
+                    });
+                }
             },
-            Err(e) => eprintln!("  PARTIAL SKIP {list_id}/{}: {e}", op.seq_no),
+            Err(e) => {
+                let error_type = if e.is_timeout() {
+                    ErrorType::NetworkTimeout
+                } else if e.is_status()
+                    && e.status() == Some(reqwest::StatusCode::TOO_MANY_REQUESTS)
+                {
+                    ErrorType::RateLimited
+                } else if e.is_connect() {
+                    ErrorType::ConnectionError
+                } else {
+                    ErrorType::NetworkTimeout
+                };
+                eprintln!("  PARTIAL SKIP {list_id}/{}: {e}", op.seq_no);
+                failed_ops.push(FailedOp {
+                    list_id: list_id.to_string(),
+                    seq_no: op.seq_no.clone(),
+                    op_name: op.name.clone(),
+                    error_type,
+                    error_message: e.to_string(),
+                });
+            }
         }
     }
 
     if parsed_ops.is_empty() {
         return SpecResult::Bail {
             reason: format!("Gateway AJAX 전부 실패 (0/{total_ops} ops)"),
+            failed_ops,
         };
     }
 
-    if parsed_ops.len() < total_ops {
+    let is_partial = !failed_ops.is_empty();
+    if is_partial {
         eprintln!(
             "  PARTIAL: {}/{total_ops} operations ({list_id})",
             parsed_ops.len()
@@ -446,12 +572,15 @@ async fn fetch_gateway_spec(
         Some(spec) => SpecResult::Spec {
             spec: Box::new(spec),
             is_gateway: true,
+            is_partial,
+            failed_ops,
         },
         None => SpecResult::Bail {
             reason: format!(
                 "Gateway build_api_spec 실패 ({}/{total_ops} ops)",
                 parsed_ops.len()
             ),
+            failed_ops,
         },
     }
 }
@@ -477,6 +606,12 @@ fn parse_args() -> Result<BuildConfig> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(50);
 
+    let retry_stubs = get_arg(&args, "--retry-stubs");
+    let max_retry_time: u64 = get_arg(&args, "--max-retry-time")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(600);
+    let retry_timeout_secs: u64 = if retry_stubs.is_some() { 30 } else { 15 };
+
     Ok(BuildConfig {
         api_key,
         output,
@@ -484,6 +619,9 @@ fn parse_args() -> Result<BuildConfig> {
         delay_ms,
         ajax_concurrency,
         ajax_delay_ms,
+        retry_timeout_secs,
+        retry_stubs,
+        max_retry_time,
     })
 }
 
@@ -492,6 +630,195 @@ fn get_arg(args: &[String], flag: &str) -> Option<String> {
         .position(|a| a == flag)
         .and_then(|i| args.get(i + 1))
         .cloned()
+}
+
+async fn run_retry(config: &BuildConfig, failed_ops_path: &str) -> Result<()> {
+    let start = Instant::now();
+    eprintln!("=== Retry: {} 읽기 ===", failed_ops_path);
+
+    // 1. failed_ops.json 읽기
+    let failed_json = std::fs::read_to_string(failed_ops_path)
+        .with_context(|| format!("failed_ops.json 읽기 실패: {}", failed_ops_path))?;
+    let failed_ops: Vec<FailedOp> = serde_json::from_str(&failed_json)?;
+
+    // ParseError는 재시도 불가 — 제외
+    let retryable: Vec<&FailedOp> = failed_ops
+        .iter()
+        .filter(|op| !matches!(op.error_type, ErrorType::ParseError))
+        .collect();
+
+    // 고유 list_id 추출
+    let mut retry_ids: Vec<String> = retryable
+        .iter()
+        .map(|op| op.list_id.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    retry_ids.sort();
+
+    eprintln!(
+        "  {} failed ops → {} retryable → {} unique list_ids",
+        failed_ops.len(),
+        retryable.len(),
+        retry_ids.len()
+    );
+
+    if retry_ids.is_empty() {
+        eprintln!("  재시도 대상 없음 (ParseError만 존재)");
+        return Ok(());
+    }
+
+    // 2. 기존 번들 로드
+    let bundle_bytes = std::fs::read(&config.output)
+        .with_context(|| format!("기존 번들 읽기 실패: {}", config.output))?;
+    let mut bundle_data: Bundle = bundle::decompress_and_deserialize(&bundle_bytes)?;
+
+    // 에러 타입별 최대 딜레이 결정
+    let has_rate_limited = retryable
+        .iter()
+        .any(|op| matches!(op.error_type, ErrorType::RateLimited));
+    let delays: &[u64] = if has_rate_limited {
+        &[60, 120, 300]
+    } else {
+        &[2, 8, 30]
+    };
+    let max_retries = 3usize;
+
+    // 3. list_id별 재수집
+    let retry_client = Arc::new(
+        reqwest::Client::builder()
+            .user_agent("korea-cli-builder/0.1.0")
+            .timeout(std::time::Duration::from_secs(config.retry_timeout_secs))
+            .build()?,
+    );
+    let ajax_semaphore = Arc::new(tokio::sync::Semaphore::new(config.ajax_concurrency));
+    let mut success_count = 0usize;
+    let mut still_partial = 0usize;
+
+    for (i, list_id) in retry_ids.iter().enumerate() {
+        if start.elapsed().as_secs() > config.max_retry_time {
+            let remaining = retry_ids.len() - i;
+            eprintln!(
+                "  MAX_RETRY_TIME({}s) 초과 — 남은 {} APIs skip",
+                config.max_retry_time, remaining
+            );
+            still_partial += remaining;
+            break;
+        }
+
+        eprintln!("  [{}/{}] retry: {}", i + 1, retry_ids.len(), list_id);
+
+        let mut succeeded = false;
+        for attempt in 0..max_retries {
+            let result = fetch_single_spec(
+                &retry_client,
+                list_id,
+                &ajax_semaphore,
+                config.ajax_delay_ms,
+                config.retry_timeout_secs,
+            )
+            .await;
+
+            match result {
+                SpecResult::Spec {
+                    spec, is_partial, ..
+                } => {
+                    if let Some(existing) = bundle_data.specs.get(list_id) {
+                        let merged = merge_operations(existing, &spec);
+                        bundle_data.specs.insert(list_id.clone(), merged);
+                    } else {
+                        bundle_data.specs.insert(list_id.clone(), *spec);
+                    }
+
+                    if is_partial {
+                        still_partial += 1;
+                        // catalog status도 PartialStub으로 승격 (Bail→PartialStub 전환 대응)
+                        if let Some(entry) = bundle_data
+                            .catalog
+                            .iter_mut()
+                            .find(|e| e.list_id == *list_id)
+                        {
+                            entry.spec_status = SpecStatus::PartialStub;
+                        }
+                        eprintln!("    여전히 부분 성공 (attempt {})", attempt + 1);
+                    } else {
+                        succeeded = true;
+                        success_count += 1;
+                        eprintln!("    완전 성공!");
+                    }
+                    break;
+                }
+                SpecResult::Bail { ref reason, .. } => {
+                    if attempt < max_retries - 1 {
+                        let delay = delays.get(attempt).copied().unwrap_or(30);
+                        eprintln!("    attempt {}: {} — {}s 대기", attempt + 1, reason, delay);
+                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                    } else {
+                        eprintln!("    {}회 시도 실패: {}", max_retries, reason);
+                        still_partial += 1;
+                    }
+                }
+                SpecResult::ExternalLink { .. } => {
+                    eprintln!("    LINK API — skip");
+                    break;
+                }
+            }
+        }
+
+        // list_id 간 딜레이 — rate limit 재발 방지
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        // catalog에서 PartialStub → Available 승격 (완전 성공 시)
+        if succeeded {
+            if let Some(entry) = bundle_data
+                .catalog
+                .iter_mut()
+                .find(|e| e.list_id == *list_id)
+            {
+                entry.spec_status = SpecStatus::Available;
+            }
+        }
+    }
+
+    // 4. 메타데이터 갱신 + 번들 재직렬화 + 저장
+    bundle_data.metadata.spec_count = bundle_data.specs.len();
+    bundle_data.metadata.checksum = format!(
+        "{:x}",
+        md5_hash(&format!(
+            "{}-{}",
+            bundle_data.metadata.api_count, bundle_data.metadata.spec_count
+        ))
+    );
+    let compressed = bundle::serialize_and_compress(&bundle_data, 3)?;
+    let output_path = std::path::Path::new(&config.output);
+    let tmp_path = output_path.with_extension("zstd.tmp");
+    std::fs::write(&tmp_path, &compressed)?;
+    std::fs::rename(&tmp_path, output_path)?;
+
+    let elapsed = start.elapsed();
+    eprintln!("\n=== Retry 완료 ===");
+    eprintln!("  성공: {}/{}", success_count, retry_ids.len());
+    eprintln!("  여전히 partial: {}", still_partial);
+    eprintln!("  소요: {:.1}초", elapsed.as_secs_f64());
+
+    Ok(())
+}
+
+/// 기존 spec을 base로 retry 결과의 새 operation을 추가/갱신.
+/// path + method 쌍으로 identity를 판별. 기존 메타데이터(auth, base_url 등) 보존.
+fn merge_operations(existing: &ApiSpec, new_spec: &ApiSpec) -> ApiSpec {
+    let mut merged = existing.clone();
+    for new_op in &new_spec.operations {
+        let dominated = merged.operations.iter().any(|op| {
+            op.path == new_op.path
+                && std::mem::discriminant(&op.method) == std::mem::discriminant(&new_op.method)
+        });
+        if !dominated {
+            merged.operations.push(new_op.clone());
+        }
+    }
+    merged.fetched_at = new_spec.fetched_at.clone();
+    merged
 }
 
 /// Simple hash for checksum (not cryptographic, just for version tracking).

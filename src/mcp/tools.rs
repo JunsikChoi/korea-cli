@@ -55,14 +55,21 @@ async fn handle_get_spec(args: serde_json::Value) -> anyhow::Result<serde_json::
     // Check for available spec
     if let Some(spec) = BUNDLE.specs.get(list_id) {
         let has_key = AppConfig::load()?.resolve_api_key().is_some();
+        let entry = BUNDLE.catalog.iter().find(|e| e.list_id == list_id);
+        let spec_status =
+            entry.map_or(crate::core::types::SpecStatus::Available, |e| e.spec_status);
+
         let mut output = serde_json::to_value(spec)?;
         if let Some(obj) = output.as_object_mut() {
             obj.insert("success".into(), json!(true));
             obj.insert(
                 "spec_status".into(),
-                serde_json::to_value(crate::core::types::SpecStatus::Available).unwrap(),
+                serde_json::to_value(spec_status).unwrap(),
             );
             obj.insert("has_api_key".into(), json!(has_key));
+            if spec_status == crate::core::types::SpecStatus::PartialStub {
+                obj.insert("partial_note".into(), json!(spec_status.user_message()));
+            }
             if !has_key {
                 obj.insert(
                     "key_guide".into(),
@@ -135,6 +142,25 @@ async fn handle_call(args: serde_json::Value) -> anyhow::Result<serde_json::Valu
     };
 
     let spec = BUNDLE.specs.get(list_id).unwrap();
+
+    // PartialStub 안내: 누락 operation 요청 시 available_operations 반환
+    let entry = BUNDLE.catalog.iter().find(|e| e.list_id == list_id);
+    let is_partial =
+        entry.is_some_and(|e| e.spec_status == crate::core::types::SpecStatus::PartialStub);
+    let has_op = spec
+        .operations
+        .iter()
+        .any(|op| op.path == operation || op.summary == operation);
+    if !has_op && is_partial {
+        return Ok(json!({
+            "success": false,
+            "list_id": list_id,
+            "spec_status": "PartialStub",
+            "message": "이 API는 일부 operation만 수집됨 — `korea-cli update`로 최신 번들을 받으면 추가 operation이 포함될 수 있습니다",
+            "available_operations": spec.operations.iter().map(|op| &op.path).collect::<Vec<_>>(),
+        }));
+    }
+
     let params: Vec<(String, String)> = args
         .get("params")
         .and_then(|v| v.as_object())

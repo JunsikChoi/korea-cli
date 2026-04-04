@@ -116,10 +116,16 @@ fn render_org_page(
         md.push_str("| API | ID | 설명 | 오퍼레이션 |\n");
         md.push_str("|-----|-----|------|----------|\n");
         for e in &available {
-            let ops = specs.get(&e.list_id).map(|s| s.operations.len()).unwrap_or(0);
+            let ops = specs
+                .get(&e.list_id)
+                .map(|s| s.operations.len())
+                .unwrap_or(0);
             let title = escape_md_table(&e.title);
             let desc = escape_md_table(&e.description);
-            let id_link = format!("[{}](https://www.data.go.kr/data/{}/openapi.do)", e.list_id, e.list_id);
+            let id_link = format!(
+                "[{}](https://www.data.go.kr/data/{}/openapi.do)",
+                e.list_id, e.list_id
+            );
             md.push_str(&format!(
                 "| {} | {} | {} | {} |\n",
                 title, id_link, desc, ops
@@ -139,7 +145,10 @@ fn render_org_page(
         for e in &external {
             let title = escape_md_table(&e.title);
             let desc = escape_md_table(&e.description);
-            let id_link = format!("[{}](https://www.data.go.kr/data/{}/openapi.do)", e.list_id, e.list_id);
+            let id_link = format!(
+                "[{}](https://www.data.go.kr/data/{}/openapi.do)",
+                e.list_id, e.list_id
+            );
             let url = &e.endpoint_url;
             let link = if url.trim().starts_with("http") {
                 let safe_url = url.replace('>', "%3E"); // [eval B-2]
@@ -162,10 +171,15 @@ fn render_org_page(
         md.push_str("|-----|-----|------|\n");
         for e in &other {
             let title = escape_md_table(&e.title);
-            let id_link = format!("[{}](https://www.data.go.kr/data/{}/openapi.do)", e.list_id, e.list_id);
+            let id_link = format!(
+                "[{}](https://www.data.go.kr/data/{}/openapi.do)",
+                e.list_id, e.list_id
+            );
             md.push_str(&format!(
                 "| {} | {} | {} |\n",
-                title, id_link, e.spec_status.user_message()
+                title,
+                id_link,
+                e.spec_status.user_message()
             ));
         }
         md.push('\n');
@@ -236,7 +250,11 @@ fn render_readme(
         })
         .collect();
     // request_count 내림차순, 동률 시 org_name으로 안정 정렬
-    org_stats.sort_by(|a, b| b.total_requests.cmp(&a.total_requests).then(a.org.cmp(&b.org)));
+    org_stats.sort_by(|a, b| {
+        b.total_requests
+            .cmp(&a.total_requests)
+            .then(a.org.cmp(&b.org))
+    });
 
     md.push_str("## 기관별 목록\n\n");
     md.push_str("| 기관 | 전체 | 호출 가능 | 외부 링크 | 오퍼레이션 |\n");

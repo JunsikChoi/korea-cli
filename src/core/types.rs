@@ -103,7 +103,7 @@ impl SpecStatus {
         if hints.is_link_api {
             return Self::External;
         }
-        if hints.is_partial {
+        if hints.is_partial && hints.has_spec {
             return Self::PartialStub;
         }
         if hints.has_spec {

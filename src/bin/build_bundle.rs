@@ -106,14 +106,17 @@ async fn main() -> Result<()> {
                 ..
             } => {
                 if is_partial {
-                    partial_ids.insert(id.clone());
                     all_failed_ops.extend(failed_ops);
                 }
                 if spec.operations.is_empty() {
+                    // partial이지만 operation 0개 → Bail과 동일 취급 (partial_ids에 넣지 않음)
                     if !is_partial {
                         skeleton_ids.insert(id);
                     }
                 } else {
+                    if is_partial {
+                        partial_ids.insert(id.clone());
+                    }
                     specs.insert(id, *spec);
                 }
             }
@@ -227,12 +230,11 @@ async fn main() -> Result<()> {
     eprintln!("\n=== Step 4/4: 직렬화 + 압축 ===");
     let compressed = bundle::serialize_and_compress(&bundle_data, 3)?;
 
-    std::fs::create_dir_all(
-        std::path::Path::new(&config.output)
-            .parent()
-            .unwrap_or(std::path::Path::new(".")),
-    )?;
-    std::fs::write(&config.output, &compressed)?;
+    let output_path = std::path::Path::new(&config.output);
+    std::fs::create_dir_all(output_path.parent().unwrap_or(std::path::Path::new(".")))?;
+    let tmp_path = output_path.with_extension("zstd.tmp");
+    std::fs::write(&tmp_path, &compressed)?;
+    std::fs::rename(&tmp_path, output_path)?;
 
     let elapsed = start.elapsed();
     eprintln!("\n=== 완료 ===");
@@ -791,19 +793,20 @@ async fn run_retry(config: &BuildConfig, failed_ops_path: &str) -> Result<()> {
     Ok(())
 }
 
-/// 기존 spec의 operation + retry 결과의 operation을 합집합
-/// path + method 쌍으로 identity를 판별
+/// 기존 spec을 base로 retry 결과의 새 operation을 추가/갱신.
+/// path + method 쌍으로 identity를 판별. 기존 메타데이터(auth, base_url 등) 보존.
 fn merge_operations(existing: &ApiSpec, new_spec: &ApiSpec) -> ApiSpec {
-    let mut merged = new_spec.clone();
-    for existing_op in &existing.operations {
+    let mut merged = existing.clone();
+    for new_op in &new_spec.operations {
         let dominated = merged.operations.iter().any(|op| {
-            op.path == existing_op.path
-                && std::mem::discriminant(&op.method) == std::mem::discriminant(&existing_op.method)
+            op.path == new_op.path
+                && std::mem::discriminant(&op.method) == std::mem::discriminant(&new_op.method)
         });
         if !dominated {
-            merged.operations.push(existing_op.clone());
+            merged.operations.push(new_op.clone());
         }
     }
+    merged.fetched_at = new_spec.fetched_at.clone();
     merged
 }
 

@@ -142,6 +142,25 @@ async fn handle_call(args: serde_json::Value) -> anyhow::Result<serde_json::Valu
     };
 
     let spec = BUNDLE.specs.get(list_id).unwrap();
+
+    // PartialStub 안내: 누락 operation 요청 시 available_operations 반환
+    let entry = BUNDLE.catalog.iter().find(|e| e.list_id == list_id);
+    let is_partial =
+        entry.is_some_and(|e| e.spec_status == crate::core::types::SpecStatus::PartialStub);
+    let has_op = spec
+        .operations
+        .iter()
+        .any(|op| op.path == operation || op.summary == operation);
+    if !has_op && is_partial {
+        return Ok(json!({
+            "success": false,
+            "list_id": list_id,
+            "spec_status": "PartialStub",
+            "message": "이 API는 일부 operation만 수집됨 — `korea-cli update`로 최신 번들을 받으면 추가 operation이 포함될 수 있습니다",
+            "available_operations": spec.operations.iter().map(|op| &op.path).collect::<Vec<_>>(),
+        }));
+    }
+
     let params: Vec<(String, String)> = args
         .get("params")
         .and_then(|v| v.as_object())

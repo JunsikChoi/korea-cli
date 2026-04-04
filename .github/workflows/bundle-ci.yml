@@ -83,16 +83,15 @@ jobs:
 
       - name: 문서 커밋 + 푸시
         if: steps.check.outputs.changed == 'true'
-        continue-on-error: true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if git diff --quiet docs/api-catalog/; then
             echo "문서 변경 없음"
           else
+            git pull --rebase origin main
             git add docs/api-catalog/
             DATE=$(date +%Y-%m-%d)
-            git pull --rebase origin main
             git commit -m "docs: 카탈로그 문서 자동 업데이트 ($DATE)"
             git push
           fi

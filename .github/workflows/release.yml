@@ -1,0 +1,127 @@
+name: Release
+
+on:
+  # 수동 배포 — 태그를 직접 지정해서 실행
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.2.0)"
+        required: true
+      bundle_tag:
+        description: "Bundle release tag to embed (leave empty = latest bundle-* release)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            binary: korea-cli
+            asset_name: korea-cli-linux-x86_64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary: korea-cli
+            asset_name: korea-cli-macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: korea-cli
+            asset_name: korea-cli-macos-aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: korea-cli.exe
+            asset_name: korea-cli-windows-x86_64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust 설정
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust 캐시 설정
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: musl 툴체인 설치 (Linux only)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get install -y musl-tools
+
+      # 임베드할 번들 URL을 결정한다.
+      # bundle_tag가 명시되면 그것을 사용, 없으면 최신 bundle-* 릴리즈에서 가져온다.
+      - name: 번들 URL 결정
+        id: bundle
+        shell: bash
+        run: |
+          BUNDLE_TAG="${{ github.event.inputs.bundle_tag }}"
+          if [ -z "$BUNDLE_TAG" ]; then
+            BUNDLE_TAG=$(gh release list --limit 20 --json tagName \
+              --jq '[.[].tagName | select(startswith("bundle-"))][0]')
+          fi
+
+          if [ -z "$BUNDLE_TAG" ]; then
+            echo "경고: bundle 릴리즈를 찾을 수 없음 — placeholder 번들로 빌드합니다"
+            echo "url=" >> $GITHUB_OUTPUT
+          else
+            BUNDLE_URL="https://github.com/${{ github.repository }}/releases/download/${BUNDLE_TAG}/bundle.zstd"
+            echo "bundle_tag=$BUNDLE_TAG" >> $GITHUB_OUTPUT
+            echo "url=$BUNDLE_URL" >> $GITHUB_OUTPUT
+            echo "임베드 번들: $BUNDLE_TAG ($BUNDLE_URL)"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: 바이너리 빌드 (번들 임베드 포함)
+        run: cargo build --release --target ${{ matrix.target }} --bin korea-cli
+        env:
+          # build.rs가 이 URL을 읽어 data/bundle.zstd를 다운로드한 뒤 include_bytes!로 임베드한다.
+          BUNDLE_DOWNLOAD_URL: ${{ steps.bundle.outputs.url }}
+
+      - name: 바이너리 이름 정규화
+        shell: bash
+        run: |
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} ${{ matrix.asset_name }}
+
+      - name: 아티팩트 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+          retention-days: 1
+
+  release:
+    name: GitHub Release 생성
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 아티팩트 다운로드
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: GitHub Release 생성
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          gh release create "$TAG" artifacts/* \
+            --title "korea-cli $TAG" \
+            --generate-notes \
+            --latest
+        env:
+          GH_TOKEN: ${{ github.token }}

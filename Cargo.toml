@@ -10,6 +10,18 @@ readme = "README.md"
 keywords = ["korea", "public-data", "cli", "mcp", "openapi"]
 categories = ["command-line-utilities", "api-bindings"]
 default-run = "korea-cli"
+# crates.io 배포 시 번들 파일을 명시적으로 포함한다.
+# data/bundle.zstd는 .gitignore 대상이지만, cargo publish 전에
+# scripts/publish.sh가 최신 번들을 다운로드한 후 publish한다.
+# include 필드는 .gitignore를 override하므로 번들이 크레이트 패키지에 포함된다.
+include = [
+  "src/**/*",
+  "build.rs",
+  "Cargo.toml",
+  "README.md",
+  "LICENSE",
+  "data/bundle.zstd",  # publish 전 scripts/publish.sh로 먼저 다운로드 필수
+]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

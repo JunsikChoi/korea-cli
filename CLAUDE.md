@@ -5,7 +5,7 @@
 ## 기술 스택
 
 - **언어**: Rust (edition 2021)
-- **주요 크레이트**: clap (CLI), tokio (async), reqwest (HTTP), serde (직렬화), postcard (바이너리 직렬화), zstd (압축), scraper (HTML 파싱)
+- **주요 크레이트**: clap (CLI), tokio (async), reqwest (HTTP), serde (직렬화), postcard (바이너리 직렬화), zstd (압축), scraper (HTML 파싱), quick-xml (XML 응답 파싱)
 - **배포**: 단일 바이너리 (cargo install, GitHub Releases) — 12K+ API 번들 내장
 
 ## 프로젝트 구조
@@ -25,6 +25,7 @@ src/
 ├── cli/           # CLI 서브커맨드 핸들러
 └── bin/
     ├── build_bundle.rs  # 번들 생성 도구 (Swagger + Gateway AJAX 추출 + --retry-stubs)
+    ├── verify_bundle.rs # 번들 schema_version 검증 (release CI gate, BundleMetadata peek)
     ├── survey.rs        # API 커버리지 서베이
     ├── html_survey.rs   # HTML 구조 서베이
     ├── crawl_pages.rs   # openapi.do 페이지 크롤러

@@ -87,7 +87,7 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 - [x] `--retry-stubs` 재수집 플래그 — failed_ops.json 기반 list_id 단위 retry + operation merge
 
 ### 4. 호출 엔진 개선
-- [ ] XML 응답 파싱 지원 (현재 JSON만 처리)
+- [x] XML 응답 파싱 지원 (quick-xml Reader 이벤트 기반 custom parser, $text/CDATA/self-closing 처리)
 - [ ] 인증 처리 일반화 — `Infuser ` 접두사 하드코딩 제거, Both+Header 경로 버그 수정
 - [ ] 사용자 입력 정규화 — 사업자번호 하이픈 등 포맷 자동 변환 (spec 기반 힌트)
 
@@ -105,15 +105,18 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 - [ ] crates.io publish 파이프라인 — `Cargo.toml include` + `scripts/publish.sh`
 
 **문서 분류 개선 (schema v4):**
-- [ ] `ApiSpec.missing_operations: Vec<String>` 필드 추가 (schema v3 → v4)
-- [ ] `build_bundle.rs`: PartialStub 시 `FailedOp.op_name` → `missing_operations` 수집
-- [ ] `gen_catalog_docs.rs`: PartialStub을 "호출 가능" 섹션으로 이동 + 상태/누락 컬럼
-- [ ] v3 번들 graceful fallback 테스트
-- [ ] CI 재빌드 트리거로 v4 번들 Release 생성
+- [x] `ApiSpec.missing_operations: Vec<String>` 필드 추가 (schema v3 → v4)
+- [x] `build_bundle.rs`: PartialStub 시 `FailedOp.op_name` → `missing_operations` 수집
+- [x] `merge_operations` retry 복구 op 동기화 (정확 일치 매칭)
+- [x] `gen_catalog_docs.rs`: PartialStub을 "호출 가능" 섹션으로 이동 + 상태/누락 컬럼
+- [x] v3 번들 graceful fallback 테스트
+- [x] `verify-bundle` 바이너리 + release.yml schema gate 추가
+- [x] `bundle.rs` embedded bundle 사용자 친화적 panic 메시지
+- [ ] CI 재빌드 트리거로 v4 번들 Release 생성 (Task 9, 별도 세션)
 
 **E2E 스모크 테스트:**
-- [ ] `tests/integration/e2e_gateway_smoke.rs` (Gateway AJAX Available 5개)
-- [ ] 수동 실행: `cargo test --test e2e_gateway_smoke -- --ignored --nocapture`
+- [x] `tests/integration/e2e_gateway_smoke.rs` (Gateway AJAX Available 5개)
+- [ ] 수동 실행: `cargo test --test e2e_gateway_smoke -- --ignored --nocapture` (Task 11)
 - [x] 대상 5개 API 이용신청 완료: 15059468, 15012690, 15073855, 15000415, 15134735
 
 **PartialStub 실제 발생률 조사 결론 (2026-04-05):**

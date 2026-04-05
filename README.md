@@ -162,6 +162,7 @@ korea-cli/
 │   ├── config/          # 설정 관리 (API 키, 환경변수)
 │   └── bin/
 │       ├── build_bundle.rs      # 번들 생성 도구 (Swagger + Gateway AJAX 추출)
+│       ├── verify_bundle.rs     # 번들 schema_version 검증 (release CI gate)
 │       ├── survey.rs            # API 전수조사 (Swagger/HTML 신호 분석)
 │       ├── html_survey.rs       # HTML 스펙 전수조사 (pk/AJAX 프로브)
 │       ├── crawl_pages.rs       # openapi.do 페이지 크롤러

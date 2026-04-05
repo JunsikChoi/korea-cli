@@ -69,7 +69,7 @@ jobs:
           BUNDLE_TAG="${{ github.event.inputs.bundle_tag }}"
           if [ -z "$BUNDLE_TAG" ]; then
             BUNDLE_TAG=$(gh release list --limit 20 --json tagName \
-              --jq '[.[].tagName | select(startswith("bundle-"))][0]')
+              --jq '[.[].tagName | select(startswith("bundle-"))][0] // empty')
           fi
 
           if [ -z "$BUNDLE_TAG" ]; then
@@ -83,6 +83,17 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ github.token }}
+
+      - name: 번들 다운로드 + schema_version 검증
+        if: steps.bundle.outputs.url != ''
+        shell: bash
+        run: |
+          mkdir -p data
+          curl -sSLf "${{ steps.bundle.outputs.url }}" -o data/bundle.zstd
+          # verify-bundle 단독 빌드 → 사전 빌드된 바이너리로 검증
+          # (cargo run은 debug 전체 빌드 유발 → CI 시간 낭비)
+          cargo build --bin verify-bundle --release --target ${{ matrix.target }}
+          ./target/${{ matrix.target }}/release/verify-bundle data/bundle.zstd
 
       - name: 바이너리 빌드 (번들 임베드 포함)
         run: cargo build --release --target ${{ matrix.target }} --bin korea-cli

@@ -207,12 +207,17 @@ pub fn parse_xml_body(xml: &str) -> Result<serde_json::Value> {
                 }
             }
             Ok(Event::Text(e)) => {
+                // trim_text(true)는 whitespace-only 노드만 제거.
+                // 실제 값의 leading/trailing padding은 여기서 trim (Eval R2 Codex S1).
                 let txt = e
                     .unescape()
                     .map_err(|err| anyhow::anyhow!("XML text unescape 실패: {err}"))?
+                    .trim()
                     .to_string();
-                if let Some(frame) = stack.last_mut() {
-                    frame.2.push_str(&txt);
+                if !txt.is_empty() {
+                    if let Some(frame) = stack.last_mut() {
+                        frame.2.push_str(&txt);
+                    }
                 }
             }
             Ok(Event::CData(e)) => {

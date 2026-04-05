@@ -849,9 +849,14 @@ fn merge_operations(existing: &ApiSpec, new_spec: &ApiSpec) -> ApiSpec {
     merged
         .missing_operations
         .retain(|name| !recovered_names.contains(name.as_str()));
-    // new_spec이 여전히 놓친 것이 있으면 추가 (union)
+    // new_spec이 여전히 놓친 것이 있으면 추가 (union).
+    // 방어 필터 (Eval R2 Codex W1): recovered에 포함된 이름은 절대 union되지 않도록 가드.
+    // 현재 fetch_gateway_spec은 성공/실패 op를 배타 분리하므로 이 조건은 실제로 발생 안 하지만,
+    // 미래 리팩토링에서 불변이 깨질 때를 대비한 방어층.
     for still_missing in &new_spec.missing_operations {
-        if !merged.missing_operations.contains(still_missing) {
+        if !recovered_names.contains(still_missing.as_str())
+            && !merged.missing_operations.contains(still_missing)
+        {
             merged.missing_operations.push(still_missing.clone());
         }
     }

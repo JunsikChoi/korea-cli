@@ -126,16 +126,21 @@ mod tests {
     fn test_load_embedded_bundle() {
         // Embedded bundle은 placeholder이거나 실제 번들이며, schema version bump 직후에는
         // 현재 struct와 호환 안 될 수 있음 (Task 9에서 v4 번들 재생성 후 통과 기대).
-        match load_bundle() {
+        //
+        // override 경로 의존성 제거를 위해 embedded 번들을 직접 검증.
+        match decompress_and_deserialize(EMBEDDED_BUNDLE) {
             Ok(bundle) => {
                 assert!(!bundle.metadata.version.is_empty());
                 assert!(bundle.metadata.schema_version <= CURRENT_SCHEMA_VERSION);
             }
             Err(e) => {
-                // schema bump 직후 과도기 허용. 에러 메시지는 번들 관련이어야 함.
-                let msg = e.to_string().to_lowercase();
+                // schema bump 직후 과도기 허용.
+                // 구체적 에러 소스만 허용 (Bundle deserialization / zstd).
+                let msg = e.to_string();
                 assert!(
-                    msg.contains("bundle") || msg.contains("deserialization"),
+                    msg.contains("Bundle deserialization")
+                        || msg.to_lowercase().contains("zstd")
+                        || msg.to_lowercase().contains("postcard"),
                     "예상 외 에러: {e}"
                 );
             }

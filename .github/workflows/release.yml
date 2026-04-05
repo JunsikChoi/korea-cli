@@ -85,15 +85,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - name: 번들 다운로드 + schema_version 검증
+        # NOTE: musl target은 musl-tools 설치 step 이후에 위치해야 함
         if: steps.bundle.outputs.url != ''
         shell: bash
+        env:
+          # build.rs가 case 2 (curl 재다운로드)로 진입하지 않도록 명시적으로 빈 값.
+          # data/bundle.zstd가 이미 curl로 받아진 상태이므로 case 1 (skip)으로 진입.
+          BUNDLE_DOWNLOAD_URL: ""
         run: |
           mkdir -p data
-          curl -sSLf "${{ steps.bundle.outputs.url }}" -o data/bundle.zstd
+          # --retry: 일시적 네트워크 장애 대비 (W1)
+          curl -sSLf --retry 3 --retry-delay 5 "${{ steps.bundle.outputs.url }}" -o data/bundle.zstd
           # verify-bundle 단독 빌드 → 사전 빌드된 바이너리로 검증
           # (cargo run은 debug 전체 빌드 유발 → CI 시간 낭비)
           cargo build --bin verify-bundle --release --target ${{ matrix.target }}
-          ./target/${{ matrix.target }}/release/verify-bundle data/bundle.zstd
+          # Windows에서는 .exe 확장자 필요
+          EXT=""
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            EXT=".exe"
+          fi
+          ./target/${{ matrix.target }}/release/verify-bundle$EXT data/bundle.zstd
 
       - name: 바이너리 빌드 (번들 임베드 포함)
         run: cargo build --release --target ${{ matrix.target }} --bin korea-cli

@@ -38,8 +38,16 @@ pub struct OperationSummary {
 
 // ── Bundle types (pre-collected data for offline use) ──
 
-/// Current bundle schema version. Increment when Bundle/CatalogEntry fields change.
-/// New variant in SpecStatus must be appended at the end (postcard varint ordering).
+/// Current bundle schema version. Bump when any type reachable from `Bundle` changes
+/// its serialization layout (Bundle, BundleMetadata, CatalogEntry, ApiSpec, Operation,
+/// Parameter, ResponseField, SpecStatus variants, etc.).
+///
+/// New variants in enums (e.g. SpecStatus) must be appended at the end (postcard varint
+/// ordering). New struct fields must also be appended at the end.
+///
+/// WARNING: verify_bundle.rs reads BundleMetadata via `postcard::take_from_bytes` peek,
+/// so BundleMetadata field layout must remain binary-compatible across bumps, OR
+/// schema_version must be bumped in lockstep with BundleMetadata changes.
 pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +57,11 @@ pub struct Bundle {
     pub specs: HashMap<String, ApiSpec>,
 }
 
+/// Bundle metadata — must be the FIRST field of `Bundle` struct.
+/// `verify_bundle.rs` peeks this via `postcard::take_from_bytes` to compare
+/// `schema_version` before full bundle deserialization. If field layout changes,
+/// bump CURRENT_SCHEMA_VERSION in lockstep to keep verify-bundle's error messages
+/// useful. New fields must be appended at the end (postcard varint ordering).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleMetadata {
     pub version: String,

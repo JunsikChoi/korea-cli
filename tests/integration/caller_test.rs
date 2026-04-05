@@ -87,9 +87,33 @@ fn test_parse_xml_flat_tags() {
 #[test]
 fn test_parse_xml_malformed() {
     use korea_cli::core::caller::parse_xml_body;
-    let xml = "not xml at all";
+    // 실제 XML 구조 오류 — 태그 미스매치 (파서 에러 경로)
+    let xml = "<a><b></a>";
     let result = parse_xml_body(xml);
-    assert!(result.is_err());
+    assert!(result.is_err(), "태그 미스매치는 에러여야 함");
+    // 순수 텍스트 — 루트 없음 에러 경로
+    let result2 = parse_xml_body("not xml at all");
+    assert!(result2.is_err());
+}
+
+#[test]
+fn test_parse_xml_cdata_preserved() {
+    // Eval R1 B1: CDATA 이벤트가 text로 보존되는지 검증
+    use korea_cli::core::caller::parse_xml_body;
+    let xml = r#"<root><msg><![CDATA[hello world]]></msg></root>"#;
+    let value = parse_xml_body(xml).unwrap();
+    let msg = find_by_key(&value, "msg").expect("msg 없음");
+    assert_eq!(msg.as_str(), Some("hello world"));
+}
+
+#[test]
+fn test_parse_xml_self_closing_root() {
+    // Eval R1 W1: 루트 레벨 self-closing 태그를 에러로 처리하지 않음
+    use korea_cli::core::caller::parse_xml_body;
+    let xml = r#"<response/>"#;
+    let value = parse_xml_body(xml).expect("self-closing root는 파싱 성공해야 함");
+    // {"response": null} 형태
+    assert!(value.get("response").is_some());
 }
 
 #[test]

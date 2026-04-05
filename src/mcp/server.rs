@@ -69,7 +69,7 @@ fn handle_tools_list() -> serde_json::Value {
         "tools": [
             {
                 "name": "search_api",
-                "description": "한국 공공데이터포털 API 카탈로그를 검색합니다. 키워드, 카테고리로 후보 API를 찾습니다. 결과의 spec_status가 Available인 API만 get_api_spec/call_api로 사용 가능합니다.",
+                "description": "한국 공공데이터포털 API 카탈로그를 검색합니다. 키워드, 카테고리로 후보 API를 찾습니다. 결과의 spec_status가 Available 또는 PartialStub인 API(is_callable=true)만 get_api_spec/call_api로 사용 가능합니다. PartialStub은 일부 operation만 수집된 상태입니다.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

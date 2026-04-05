@@ -829,23 +829,26 @@ fn merge_operations(existing: &ApiSpec, new_spec: &ApiSpec) -> ApiSpec {
         }
     }
     merged.fetched_at = new_spec.fetched_at.clone();
-    // Round 1 W1 / Round 2 W-R2-1: retry로 복구된 op의 이름을 missing_operations에서 제거.
+    // Round 1 W1 / Round 2 W-R2-1 / Eval R1 B2:
+    // retry로 복구된 op의 이름을 missing_operations에서 제거.
     //
     // 주의: missing_operations에 들어간 값은 FailedOp.op_name (드롭다운 select 텍스트)이고,
     // Operation.summary는 AJAX 상세 응답의 description이다. 두 값이 100% 일치한다는 보장은 없지만,
     // 현 시점 data.go.kr 샘플에서는 동일 문자열로 관찰됨.
-    // → substring 매칭 + 정확히 일치 매칭을 둘 다 적용해 false-stale 최소화.
+    //
+    // 매칭 전략: **정확 일치만**. substring 매칭은 한국어 공통 어근("조회", "발표",
+    // "목록", "현황")이 많아 false-positive가 심하다.
+    //   예: missing="조회" ↔ recovered="상세기상조회" → substring 어느 방향이든 잘못 매칭.
+    // 정확 일치에서 누락되는 케이스(op_name ↔ summary 형식 차이)는 다음 수집 라운드에서
+    // 동일 list_id를 새로 수집할 때 자연스럽게 재계산되므로 stale 위험은 제한적.
     let recovered_names: std::collections::HashSet<&str> = new_spec
         .operations
         .iter()
         .map(|op| op.summary.as_str())
         .collect();
-    merged.missing_operations.retain(|name| {
-        !recovered_names.contains(name.as_str())
-            && !recovered_names
-                .iter()
-                .any(|r| r.contains(name.as_str()) || name.contains(*r))
-    });
+    merged
+        .missing_operations
+        .retain(|name| !recovered_names.contains(name.as_str()));
     // new_spec이 여전히 놓친 것이 있으면 추가 (union)
     for still_missing in &new_spec.missing_operations {
         if !merged.missing_operations.contains(still_missing) {

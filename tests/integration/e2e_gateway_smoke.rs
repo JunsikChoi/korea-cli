@@ -80,12 +80,18 @@ async fn e2e_gateway_smoke_available_operations() {
 
         match call_api(spec, &op.path, &params, &api_key).await {
             Ok(resp) => {
+                // resp.data는 이미 parse_xml_body로 파싱된 Value — Value에서 직접 key 탐색.
+                // (Eval R1 W2: to_string() 후 substring 재파싱은 취약한 포맷 의존)
+                let code = resp
+                    .data
+                    .as_ref()
+                    .map(extract_result_code_from_value)
+                    .unwrap_or_default();
                 let body = resp
                     .data
                     .as_ref()
                     .map(|v| v.to_string())
                     .unwrap_or_default();
-                let code = extract_result_code(&body);
 
                 if SKIPPABLE_ERROR_CODES.iter().any(|c| code.contains(c)) {
                     eprintln!("SKIP: {}", code);
@@ -187,6 +193,40 @@ fn extract_tag(body: &str, tag: &str) -> Option<String> {
     Some(rest[..end].trim().to_string())
 }
 
+/// Value에서 직접 resultCode/returnAuthMsg 찾기 (Eval R1 W2).
+/// parse_xml_body가 이미 Value로 변환한 결과에서 재귀 탐색.
+/// 우선순위: returnAuthMsg → resultCode → errMsg.
+fn extract_result_code_from_value(v: &serde_json::Value) -> String {
+    if let Some(s) = find_key_recursive(v, "returnAuthMsg") {
+        if !s.is_empty() {
+            return s;
+        }
+    }
+    if let Some(s) = find_key_recursive(v, "resultCode") {
+        if !s.is_empty() {
+            return s;
+        }
+    }
+    find_key_recursive(v, "errMsg").unwrap_or_default()
+}
+
+fn find_key_recursive(v: &serde_json::Value, key: &str) -> Option<String> {
+    match v {
+        serde_json::Value::Object(m) => {
+            if let Some(x) = m.get(key) {
+                return match x {
+                    serde_json::Value::String(s) => Some(s.clone()),
+                    serde_json::Value::Number(n) => Some(n.to_string()),
+                    _ => None,
+                };
+            }
+            m.values().find_map(|x| find_key_recursive(x, key))
+        }
+        serde_json::Value::Array(a) => a.iter().find_map(|x| find_key_recursive(x, key)),
+        _ => None,
+    }
+}
+
 #[test]
 fn test_extract_result_code_xml() {
     let xml = "<response><header><resultCode>00</resultCode></header></response>";
@@ -207,4 +247,36 @@ fn test_extract_result_code_return_auth_msg() {
 fn test_extract_result_code_errmsg_fallback() {
     let xml = "<root><errMsg>fallback error</errMsg></root>";
     assert_eq!(extract_result_code(xml), "fallback error");
+}
+
+#[test]
+fn test_extract_result_code_from_value_nested() {
+    // parse_xml_body 결과 Value에서 중첩된 resultCode 재귀 탐색
+    let v = serde_json::json!({
+        "response": {
+            "header": {
+                "resultCode": "00",
+                "resultMsg": "NORMAL SERVICE."
+            }
+        }
+    });
+    assert_eq!(extract_result_code_from_value(&v), "00");
+}
+
+#[test]
+fn test_extract_result_code_from_value_auth_error_priority() {
+    // returnAuthMsg가 resultCode보다 우선순위 높음
+    let v = serde_json::json!({
+        "OpenAPI_ServiceResponse": {
+            "cmmMsgHeader": {
+                "errMsg": "SERVICE ERROR",
+                "returnReasonCode": "12",
+                "returnAuthMsg": "SERVICE_KEY_IS_NOT_REGISTERED_ERROR"
+            }
+        }
+    });
+    assert_eq!(
+        extract_result_code_from_value(&v),
+        "SERVICE_KEY_IS_NOT_REGISTERED_ERROR"
+    );
 }

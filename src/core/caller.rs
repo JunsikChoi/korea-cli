@@ -174,13 +174,17 @@ pub fn parse_xml_body(xml: &str) -> Result<serde_json::Value> {
                 stack.push((name, serde_json::Map::new(), String::new()));
             }
             Ok(Event::End(_)) => {
-                let (name, children, text) = stack
+                let (name, mut children, text) = stack
                     .pop()
                     .ok_or_else(|| anyhow::anyhow!("XML 스택 언더플로우"))?;
-                let value = if children.is_empty() {
-                    serde_json::Value::String(text)
-                } else {
-                    serde_json::Value::Object(children)
+                // text와 children이 공존하면 $text 키로 보존 (mixed content 대응)
+                let value = match (children.is_empty(), text.is_empty()) {
+                    (true, _) => serde_json::Value::String(text),
+                    (false, true) => serde_json::Value::Object(children),
+                    (false, false) => {
+                        children.insert("$text".to_string(), serde_json::Value::String(text));
+                        serde_json::Value::Object(children)
+                    }
                 };
                 if let Some(parent) = stack.last_mut() {
                     // 반복 태그 → 배열 승격
@@ -211,10 +215,20 @@ pub fn parse_xml_body(xml: &str) -> Result<serde_json::Value> {
                     frame.2.push_str(&txt);
                 }
             }
+            Ok(Event::CData(e)) => {
+                // CDATA는 raw 바이트로 유지 (unescape 불필요)
+                let txt = String::from_utf8_lossy(e.as_ref()).to_string();
+                if let Some(frame) = stack.last_mut() {
+                    frame.2.push_str(&txt);
+                }
+            }
             Ok(Event::Empty(e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 if let Some(parent) = stack.last_mut() {
                     parent.1.insert(name, serde_json::Value::Null);
+                } else {
+                    // 루트 레벨 self-closing 태그 (예: <response/>)
+                    root = Some((name, serde_json::Value::Null));
                 }
             }
             Ok(Event::Eof) => break,

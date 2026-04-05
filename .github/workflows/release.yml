@@ -89,8 +89,9 @@ jobs:
         if: steps.bundle.outputs.url != ''
         shell: bash
         env:
-          # build.rs가 case 2 (curl 재다운로드)로 진입하지 않도록 명시적으로 빈 값.
-          # data/bundle.zstd가 이미 curl로 받아진 상태이므로 case 1 (skip)으로 진입.
+          # data/bundle.zstd는 아래 curl이 먼저 기록하므로 build.rs는 case 1 (skip)으로 진입.
+          # BUNDLE_DOWNLOAD_URL을 명시적으로 빈 값으로 설정하는 것은 추가 방어층 —
+          # curl 실패 등 예외 상황에서 build.rs가 빈 URL로 case 2를 시도하지 않도록 한다.
           BUNDLE_DOWNLOAD_URL: ""
         run: |
           mkdir -p data

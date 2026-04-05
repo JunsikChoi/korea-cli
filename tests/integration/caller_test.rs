@@ -107,6 +107,27 @@ fn test_parse_xml_cdata_preserved() {
 }
 
 #[test]
+fn test_parse_xml_mixed_content() {
+    // Eval R2 W-R2-1: text와 children이 공존하는 mixed content → $text 키로 보존
+    use korea_cli::core::caller::parse_xml_body;
+    // trim_text(true)가 whitespace-only text를 제거하므로, 실제 text가 있어야 보존됨
+    let xml = r#"<root>direct text<child>val</child></root>"#;
+    let value = parse_xml_body(xml).unwrap();
+    let root = value.get("root").expect("root 없음");
+    let root_obj = root.as_object().expect("root는 Object여야 함");
+    assert_eq!(
+        root_obj.get("$text").and_then(|v| v.as_str()),
+        Some("direct text"),
+        "$text 키에 direct text 보존"
+    );
+    assert_eq!(
+        root_obj.get("child").and_then(|v| v.as_str()),
+        Some("val"),
+        "child element도 함께 보존"
+    );
+}
+
+#[test]
 fn test_parse_xml_self_closing_root() {
     // Eval R1 W1: 루트 레벨 self-closing 태그를 에러로 처리하지 않음
     use korea_cli::core::caller::parse_xml_body;

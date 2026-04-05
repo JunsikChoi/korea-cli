@@ -76,7 +76,12 @@ fn test_parse_xml_flat_tags() {
     let value = result.unwrap();
     // resultCode는 단순 문자열로 나타나야 함 (quick-xml serde의 $text 래퍼 없이)
     let code = find_by_key(&value, "resultCode").expect("resultCode 없음");
-    assert_eq!(code.as_str(), Some("00"), "resultCode 직접 매칭: {:?}", code);
+    assert_eq!(
+        code.as_str(),
+        Some("00"),
+        "resultCode 직접 매칭: {:?}",
+        code
+    );
 }
 
 #[test]

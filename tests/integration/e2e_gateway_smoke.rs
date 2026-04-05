@@ -147,9 +147,10 @@ fn build_default_params(op: &korea_cli::core::types::Operation) -> Vec<(String, 
 }
 
 /// 응답 body에서 에러 코드 추출. data.go.kr의 두 가지 응답 구조 모두 커버:
-/// 1. 정상: <response><header><resultCode>XX</resultCode></header></response>
-/// 2. 인증오류: <OpenAPI_ServiceResponse><cmmMsgHeader><returnAuthMsg>XXX_ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>
-/// Round 1 B7: <returnAuthMsg>를 우선순위 높게 탐색 — SKIPPABLE 매칭을 위해.
+/// 1. 정상: `<response><header><resultCode>XX</resultCode></header></response>`
+/// 2. 인증오류: `<OpenAPI_ServiceResponse><cmmMsgHeader><returnAuthMsg>XXX_ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>`
+///
+/// Round 1 B7: `<returnAuthMsg>`를 우선순위 높게 탐색 — SKIPPABLE 매칭을 위해.
 fn extract_result_code(body: &str) -> String {
     // 1. XML: <returnAuthMsg> (인증 에러 시 data.go.kr 표준)
     if let Some(code) = extract_tag(body, "returnAuthMsg") {
@@ -169,9 +170,7 @@ fn extract_result_code(body: &str) -> String {
         if let Some(colon) = rest.find(':') {
             let after = &rest[colon + 1..];
             let trimmed = after.trim_start_matches(['"', ' ', '\t']);
-            let end = trimmed
-                .find(|c: char| c == '"' || c == ',' || c == '}')
-                .unwrap_or(trimmed.len());
+            let end = trimmed.find(['"', ',', '}']).unwrap_or(trimmed.len());
             return trimmed[..end].trim().to_string();
         }
     }

@@ -98,3 +98,7 @@ path = "tests/integration/swagger_test.rs"
 [[test]]
 name = "caller_test"
 path = "tests/integration/caller_test.rs"
+
+[[test]]
+name = "e2e_gateway_smoke"
+path = "tests/integration/e2e_gateway_smoke.rs"

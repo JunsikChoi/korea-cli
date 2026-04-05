@@ -168,8 +168,13 @@ korea-cli/
 │       ├── analyze_pages.rs     # HTML 구조 신호 추출기
 │       ├── summarize_signals.rs # 신호 빈도 분석 + 클러스터링
 │       └── gen_catalog_docs.rs  # API 카탈로그 markdown 문서 생성
-├── build.rs             # 개발용 placeholder 번들 자동 생성
+├── build.rs             # 번들 해결 (로컬 → BUNDLE_DOWNLOAD_URL env → placeholder 3단계)
 ├── tests/               # 통합 테스트
+├── scripts/
+│   └── publish.sh       # crates.io 배포 (번들 다운로드 → cargo publish)
+├── .github/workflows/
+│   ├── bundle-ci.yml    # 주 1회 번들 수집 + Release 배포
+│   └── release.yml      # 바이너리 릴리즈 CI (4 플랫폼 크로스 빌드)
 ├── docs/
 │   ├── roadmap/         # 장기 로드맵 (Phase 1~3)
 │   ├── devlogs/         # 개발 로그
@@ -195,6 +200,7 @@ korea-cli/
 | [Gateway 스펙 추출 플랜](docs/plans/2026-04-02-gateway-spec-extraction-plan.md) | 구현 태스크 (TDD 기반) |
 | [PartialStub + CI 설계](docs/specs/2026-04-04-partial-stub-and-ci-pipeline-design.md) | 부분 수집 분류 + CI 자동화 아키텍처 |
 | [PartialStub + CI 플랜](docs/plans/2026-04-04-partial-stub-and-ci-pipeline.md) | 구현 태스크 (TDD 기반) |
+| [PartialStub 마무리 + 번들 배포 설계](docs/specs/2026-04-05-partial-stub-finalization-design.md) | 문서 분류 + 바이너리 릴리즈 CI + crates.io 파이프라인 |
 
 ## 로드맵
 

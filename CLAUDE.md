@@ -33,7 +33,11 @@ src/
     └── gen_catalog_docs.rs  # API 카탈로그 markdown 문서 생성
 .github/
 └── workflows/
-    └── bundle-ci.yml    # 주 1회 번들 수집 + retry + Release 배포
+    ├── bundle-ci.yml    # 주 1회 번들 수집 + retry + Release 배포
+    └── release.yml      # 바이너리 릴리즈 CI (4 플랫폼 크로스 빌드)
+scripts/
+└── publish.sh           # crates.io 배포 (번들 다운로드 → cargo publish)
+build.rs                 # 번들 해결 3단계 (로컬 → BUNDLE_DOWNLOAD_URL → placeholder)
 ```
 
 ## 코딩 컨벤션

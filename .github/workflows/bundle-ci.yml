@@ -59,7 +59,7 @@ jobs:
           echo "new_hash=$NEW_HASH" >> $GITHUB_OUTPUT
 
           # 이전 bundle- 태그 릴리즈에서 번들 다운로드 시도
-          PREV_TAG=$(gh release list --limit 20 --json tagName --jq '[.[].tagName | select(startswith("bundle-"))][0]' 2>/dev/null || true)
+          PREV_TAG=$(gh release list --limit 20 --json tagName --jq '[.[].tagName | select(startswith("bundle-"))][0] // empty' 2>/dev/null || true)
           if [ -n "$PREV_TAG" ] && gh release download "$PREV_TAG" --pattern bundle.zstd --dir /tmp/prev --repo "${{ github.repository }}" 2>/dev/null; then
             OLD_HASH=$(sha256sum /tmp/prev/bundle.zstd | awk '{print $1}')
             echo "old_hash=$OLD_HASH" >> $GITHUB_OUTPUT
@@ -103,7 +103,6 @@ jobs:
           TAG="bundle-${DATE}-${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" $BUNDLE_PATH \
             --title "Bundle ${DATE}" \
-            --latest \
             --notes "자동 수집 ${DATE}"
         env:
           GH_TOKEN: ${{ github.token }}

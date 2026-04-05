@@ -28,7 +28,14 @@ pub async fn call_api(
         )
     })?;
 
-    let url = format!("{}{}", spec.base_url, op.path);
+    // Round 1 W7: base_url trailing slash + path leading slash 충돌 방어
+    let base = spec.base_url.trim_end_matches('/');
+    let path = if op.path.starts_with('/') {
+        op.path.clone()
+    } else {
+        format!("/{}", op.path)
+    };
+    let url = format!("{}{}", base, path);
     let client = reqwest::Client::new();
 
     let mut request = match op.method {
@@ -56,7 +63,15 @@ pub async fn call_api(
 
     let response = request.send().await?;
     let status = response.status().as_u16();
-    let body: serde_json::Value = response.json().await?;
+
+    // Parse body based on ResponseFormat (XML or JSON)
+    let body: serde_json::Value = match spec.extractor.format {
+        ResponseFormat::Json => response.json().await?,
+        ResponseFormat::Xml => {
+            let text = response.text().await?;
+            parse_xml_body(&text)?
+        }
+    };
 
     let data = extract_data(&body, &spec.extractor);
 
@@ -128,4 +143,95 @@ fn extract_data(body: &serde_json::Value, extractor: &ResponseExtractor) -> serd
         }
     }
     current.clone()
+}
+
+/// XML 응답 본문을 serde_json::Value로 변환한다.
+/// data.go.kr Gateway API의 XML 응답을 flat tag→value 또는 중첩 object로 매핑.
+///
+/// 규칙:
+/// - text 노드만 있는 요소: `{tag: "text"}`
+/// - 자식 요소가 있는 요소: `{tag: {...}}`
+/// - 같은 tag가 반복되면 `{tag: [...]}`로 배열 승격
+/// - attribute는 무시 (data.go.kr 응답에 attribute 거의 없음)
+/// - $text 래퍼 사용 안 함 (quick-xml serde feature의 구조 변경 방지)
+pub fn parse_xml_body(xml: &str) -> Result<serde_json::Value> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    // 스택: (tag_name, children_map, text_buf)
+    type Frame = (String, serde_json::Map<String, serde_json::Value>, String);
+    let mut stack: Vec<Frame> = vec![];
+    let mut root: Option<(String, serde_json::Value)> = None;
+
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                stack.push((name, serde_json::Map::new(), String::new()));
+            }
+            Ok(Event::End(_)) => {
+                let (name, children, text) = stack
+                    .pop()
+                    .ok_or_else(|| anyhow::anyhow!("XML 스택 언더플로우"))?;
+                let value = if children.is_empty() {
+                    serde_json::Value::String(text)
+                } else {
+                    serde_json::Value::Object(children)
+                };
+                if let Some(parent) = stack.last_mut() {
+                    // 반복 태그 → 배열 승격
+                    match parent.1.remove(&name) {
+                        Some(serde_json::Value::Array(mut arr)) => {
+                            arr.push(value);
+                            parent.1.insert(name, serde_json::Value::Array(arr));
+                        }
+                        Some(existing) => {
+                            parent
+                                .1
+                                .insert(name, serde_json::Value::Array(vec![existing, value]));
+                        }
+                        None => {
+                            parent.1.insert(name, value);
+                        }
+                    }
+                } else {
+                    root = Some((name, value));
+                }
+            }
+            Ok(Event::Text(e)) => {
+                let txt = e
+                    .unescape()
+                    .map_err(|err| anyhow::anyhow!("XML text unescape 실패: {err}"))?
+                    .to_string();
+                if let Some(frame) = stack.last_mut() {
+                    frame.2.push_str(&txt);
+                }
+            }
+            Ok(Event::Empty(e)) => {
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                if let Some(parent) = stack.last_mut() {
+                    parent.1.insert(name, serde_json::Value::Null);
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {} // comments, declarations, etc. — skip
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "XML 파싱 실패 at pos {}: {}",
+                    reader.buffer_position(),
+                    e
+                ));
+            }
+        }
+        buf.clear();
+    }
+
+    let (root_name, root_value) = root.ok_or_else(|| anyhow::anyhow!("XML 루트 노드 없음"))?;
+    let mut out = serde_json::Map::new();
+    out.insert(root_name, root_value);
+    Ok(serde_json::Value::Object(out))
 }

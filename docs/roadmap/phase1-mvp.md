@@ -91,6 +91,36 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 - [ ] 인증 처리 일반화 — `Infuser ` 접두사 하드코딩 제거, Both+Header 경로 버그 수정
 - [ ] 사용자 입력 정규화 — 사업자번호 하이픈 등 포맷 자동 변환 (spec 기반 힌트)
 
+### 5. PartialStub 마무리 + 번들 배포 파이프라인
+설계: `docs/specs/2026-04-05-partial-stub-finalization-design.md`
+
+**번들 인프라 정비:**
+- [x] 번들 v3 스키마 교체 (`data/bundle.zstd` 최신화)
+- [x] orphan `bundle-gateway.zstd` 정리
+- [ ] `Makefile update-bundle` 헬퍼 추가 (Release → 로컬 번들 동기화)
+
+**번들 배포 파이프라인 (Option A': 임베드 유지 + DX/CI 개선):**
+- [ ] `build.rs` 3단계 fallback (로컬 → `BUNDLE_DOWNLOAD_URL` env → placeholder)
+- [ ] 바이너리 릴리즈 CI (`.github/workflows/release.yml`) — 크로스 빌드 4 플랫폼
+- [ ] crates.io publish 파이프라인 — `Cargo.toml include` + `scripts/publish.sh`
+
+**문서 분류 개선 (schema v4):**
+- [ ] `ApiSpec.missing_operations: Vec<String>` 필드 추가 (schema v3 → v4)
+- [ ] `build_bundle.rs`: PartialStub 시 `FailedOp.op_name` → `missing_operations` 수집
+- [ ] `gen_catalog_docs.rs`: PartialStub을 "호출 가능" 섹션으로 이동 + 상태/누락 컬럼
+- [ ] v3 번들 graceful fallback 테스트
+- [ ] CI 재빌드 트리거로 v4 번들 Release 생성
+
+**E2E 스모크 테스트:**
+- [ ] `tests/integration/e2e_gateway_smoke.rs` (Gateway AJAX Available 5개)
+- [ ] 수동 실행: `cargo test --test e2e_gateway_smoke -- --ignored --nocapture`
+- [x] 대상 5개 API 이용신청 완료: 15059468, 15012690, 15073855, 15000415, 15134735
+
+**PartialStub 실제 발생률 조사 결론 (2026-04-05):**
+- 4/4 CI 실행 결과: PartialStub **0건** (Gateway AJAX all-or-nothing 패턴)
+- `fetch_gateway_spec` 감지 로직 자체는 버그 없음
+- feature는 timeout/간헐 오류 방어망으로 유지 (3개월 후 재평가)
+
 ---
 
 ## Phase 2: 호출 안정화 + 배포 (예정)

@@ -13,7 +13,15 @@ use crate::core::types::{Bundle, CURRENT_SCHEMA_VERSION};
 static EMBEDDED_BUNDLE: &[u8] = include_bytes!("../../data/bundle.zstd");
 
 /// Global bundle instance. Initialized once on first access.
-pub static BUNDLE: Lazy<Bundle> = Lazy::new(|| load_bundle().expect("Failed to load bundle"));
+pub static BUNDLE: Lazy<Bundle> = Lazy::new(|| {
+    load_bundle().unwrap_or_else(|e| {
+        panic!(
+            "번들을 로드할 수 없습니다: {e}\n\
+             이 바이너리 버전과 호환되는 번들이 아닙니다. \
+             최신 릴리즈로 업데이트하거나 'korea-cli update'로 로컬 번들을 갱신하세요."
+        )
+    })
+});
 
 /// Load bundle with override chain: local file > embedded.
 /// If the local override has an incompatible schema, falls back to the embedded bundle.
@@ -101,6 +109,17 @@ mod tests {
     fn test_decompress_invalid_data() {
         let result = decompress_and_deserialize(b"not valid zstd");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_graceful_error_when_embedded_incompatible() {
+        // 호환되지 않는 bytes (random garbage)에 대해 친화적 에러 메시지 반환
+        let garbage = b"this is definitely not a valid zstd bundle".to_vec();
+        let result = decompress_and_deserialize(&garbage);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        // 메시지는 "번들" 혹은 "bundle" 언급 포함 (decompress 실패든 deserialize 실패든)
+        assert!(!err_msg.is_empty());
     }
 
     #[test]

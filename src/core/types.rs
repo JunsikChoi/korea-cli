@@ -38,9 +38,17 @@ pub struct OperationSummary {
 
 // ── Bundle types (pre-collected data for offline use) ──
 
-/// Current bundle schema version. Increment when Bundle/CatalogEntry fields change.
-/// New variant in SpecStatus must be appended at the end (postcard varint ordering).
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+/// Current bundle schema version. Bump when any type reachable from `Bundle` changes
+/// its serialization layout (Bundle, BundleMetadata, CatalogEntry, ApiSpec, Operation,
+/// Parameter, ResponseField, SpecStatus variants, etc.).
+///
+/// New variants in enums (e.g. SpecStatus) must be appended at the end (postcard varint
+/// ordering). New struct fields must also be appended at the end.
+///
+/// WARNING: verify_bundle.rs reads BundleMetadata via `postcard::take_from_bytes` peek,
+/// so BundleMetadata field layout must remain binary-compatible across bumps, OR
+/// schema_version must be bumped in lockstep with BundleMetadata changes.
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bundle {
@@ -49,6 +57,11 @@ pub struct Bundle {
     pub specs: HashMap<String, ApiSpec>,
 }
 
+/// Bundle metadata — must be the FIRST field of `Bundle` struct.
+/// `verify_bundle.rs` peeks this via `postcard::take_from_bytes` to compare
+/// `schema_version` before full bundle deserialization. If field layout changes,
+/// bump CURRENT_SCHEMA_VERSION in lockstep to keep verify-bundle's error messages
+/// useful. New fields must be appended at the end (postcard varint ordering).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleMetadata {
     pub version: String,
@@ -165,6 +178,10 @@ pub struct ApiSpec {
     pub extractor: ResponseExtractor,
     pub operations: Vec<Operation>,
     pub fetched_at: String,
+    /// PartialStub API에서 수집 실패한 operation의 사람 읽을 이름.
+    /// Available API에서는 항상 빈 벡터.
+    /// WARNING: postcard varint 순서 보존을 위해 반드시 맨 마지막 필드여야 함.
+    pub missing_operations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -607,5 +624,86 @@ mod tests {
         // PartialStub은 variant index 6이어야 함 (0-indexed, 끝에 추가)
         let bytes = postcard::to_allocvec(&SpecStatus::PartialStub).unwrap();
         assert_eq!(bytes[0], 6);
+    }
+
+    #[test]
+    fn test_schema_v4_constant() {
+        assert_eq!(CURRENT_SCHEMA_VERSION, 4);
+    }
+
+    fn make_test_spec(missing: Vec<String>) -> ApiSpec {
+        ApiSpec {
+            list_id: "15000001".into(),
+            base_url: "https://apis.data.go.kr/test".into(),
+            protocol: ApiProtocol::DataGoKrRest,
+            auth: AuthMethod::None,
+            extractor: ResponseExtractor {
+                data_path: vec![],
+                error_check: ErrorCheck::HttpStatus,
+                pagination: None,
+                format: ResponseFormat::Xml,
+            },
+            operations: vec![],
+            fetched_at: "2026-04-05".into(),
+            missing_operations: missing,
+        }
+    }
+
+    #[test]
+    fn test_missing_operations_serialization_roundtrip() {
+        let spec = make_test_spec(vec!["getFcstVersion".into(), "getMidFcst".into()]);
+        let bytes = postcard::to_allocvec(&spec).unwrap();
+        let decoded: ApiSpec = postcard::from_bytes(&bytes).unwrap();
+        assert_eq!(
+            decoded.missing_operations,
+            vec!["getFcstVersion".to_string(), "getMidFcst".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_missing_operations_empty_default_roundtrip() {
+        // Available API의 기본값 (빈 벡터) 직렬화/역직렬화 검증
+        let spec = make_test_spec(vec![]);
+        let bytes = postcard::to_allocvec(&spec).unwrap();
+        let decoded: ApiSpec = postcard::from_bytes(&bytes).unwrap();
+        assert!(decoded.missing_operations.is_empty());
+    }
+
+    #[test]
+    fn test_api_spec_is_last_field() {
+        // postcard는 필드 선언 순서로 직렬화. missing_operations를 맨 마지막에 추가했는지 검증.
+        // v3 bytes(missing_operations 없음)를 v4 struct로 역직렬화하면 trailing data 부족으로 실패해야 함.
+        #[derive(serde::Serialize)]
+        struct ApiSpecV3 {
+            list_id: String,
+            base_url: String,
+            protocol: ApiProtocol,
+            auth: AuthMethod,
+            extractor: ResponseExtractor,
+            operations: Vec<Operation>,
+            fetched_at: String,
+            // missing_operations 없음 — v3 스키마
+        }
+        let v3 = ApiSpecV3 {
+            list_id: "x".into(),
+            base_url: "x".into(),
+            protocol: ApiProtocol::DataGoKrRest,
+            auth: AuthMethod::None,
+            extractor: ResponseExtractor {
+                data_path: vec![],
+                error_check: ErrorCheck::HttpStatus,
+                pagination: None,
+                format: ResponseFormat::Json,
+            },
+            operations: vec![],
+            fetched_at: "x".into(),
+        };
+        // ApiSpec 자체를 직접 직렬화/역직렬화 → v3 bytes는 v4 struct가 기대하는 trailing field 부족
+        let bytes = postcard::to_allocvec(&v3).unwrap();
+        let result = postcard::from_bytes::<ApiSpec>(&bytes);
+        assert!(
+            result.is_err(),
+            "v3 ApiSpec bytes는 v4 ApiSpec struct로 역직렬화 실패해야 함 (trailing bytes 부족)"
+        );
     }
 }

@@ -45,10 +45,13 @@ fn main() {
     std::fs::create_dir_all("data").unwrap();
 
     // Case 2: CI provides a pre-built bundle URL.
+    // 빈 문자열은 환경변수 미설정과 동일하게 취급 (release.yml이 명시적으로 "" 설정하는 경우 대비).
     if let Ok(url) = std::env::var("BUNDLE_DOWNLOAD_URL") {
-        eprintln!("build.rs: downloading bundle from {url}");
-        download_bundle(&url, path);
-        return;
+        if !url.is_empty() {
+            eprintln!("build.rs: downloading bundle from {url}");
+            download_bundle(&url, path);
+            return;
+        }
     }
 
     // Case 3: Fallback placeholder — zero-entry bundle.

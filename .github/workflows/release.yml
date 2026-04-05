@@ -69,7 +69,7 @@ jobs:
           BUNDLE_TAG="${{ github.event.inputs.bundle_tag }}"
           if [ -z "$BUNDLE_TAG" ]; then
             BUNDLE_TAG=$(gh release list --limit 20 --json tagName \
-              --jq '[.[].tagName | select(startswith("bundle-"))][0]')
+              --jq '[.[].tagName | select(startswith("bundle-"))][0] // empty')
           fi
 
           if [ -z "$BUNDLE_TAG" ]; then
@@ -83,6 +83,29 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ github.token }}
+
+      - name: 번들 다운로드 + schema_version 검증
+        # NOTE: musl target은 musl-tools 설치 step 이후에 위치해야 함
+        if: steps.bundle.outputs.url != ''
+        shell: bash
+        env:
+          # data/bundle.zstd는 아래 curl이 먼저 기록하므로 build.rs는 case 1 (skip)으로 진입.
+          # BUNDLE_DOWNLOAD_URL을 명시적으로 빈 값으로 설정하는 것은 추가 방어층 —
+          # curl 실패 등 예외 상황에서 build.rs가 빈 URL로 case 2를 시도하지 않도록 한다.
+          BUNDLE_DOWNLOAD_URL: ""
+        run: |
+          mkdir -p data
+          # --retry: 일시적 네트워크 장애 대비 (W1)
+          curl -sSLf --retry 3 --retry-delay 5 "${{ steps.bundle.outputs.url }}" -o data/bundle.zstd
+          # verify-bundle 단독 빌드 → 사전 빌드된 바이너리로 검증
+          # (cargo run은 debug 전체 빌드 유발 → CI 시간 낭비)
+          cargo build --bin verify-bundle --release --target ${{ matrix.target }}
+          # Windows에서는 .exe 확장자 필요
+          EXT=""
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            EXT=".exe"
+          fi
+          ./target/${{ matrix.target }}/release/verify-bundle$EXT data/bundle.zstd
 
       - name: 바이너리 빌드 (번들 임베드 포함)
         run: cargo build --release --target ${{ matrix.target }} --bin korea-cli

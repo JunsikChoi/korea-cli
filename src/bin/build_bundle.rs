@@ -569,12 +569,23 @@ async fn fetch_gateway_spec(
     }
 
     match build_api_spec(list_id, &parsed_ops) {
-        Some(spec) => SpecResult::Spec {
-            spec: Box::new(spec),
-            is_gateway: true,
-            is_partial,
-            failed_ops,
-        },
+        Some(mut spec) => {
+            // PartialStub일 때 failed_ops를 missing_operations로 변환
+            // op_name 빈 문자열은 필터링 (W-Back2 대응)
+            if is_partial {
+                spec.missing_operations = failed_ops
+                    .iter()
+                    .filter(|f| !f.op_name.trim().is_empty())
+                    .map(|f| f.op_name.clone())
+                    .collect();
+            }
+            SpecResult::Spec {
+                spec: Box::new(spec),
+                is_gateway: true,
+                is_partial,
+                failed_ops,
+            }
+        }
         None => SpecResult::Bail {
             reason: format!(
                 "Gateway build_api_spec 실패 ({}/{total_ops} ops)",
@@ -818,6 +829,37 @@ fn merge_operations(existing: &ApiSpec, new_spec: &ApiSpec) -> ApiSpec {
         }
     }
     merged.fetched_at = new_spec.fetched_at.clone();
+    // Round 1 W1 / Round 2 W-R2-1 / Eval R1 B2:
+    // retry로 복구된 op의 이름을 missing_operations에서 제거.
+    //
+    // 주의: missing_operations에 들어간 값은 FailedOp.op_name (드롭다운 select 텍스트)이고,
+    // Operation.summary는 AJAX 상세 응답의 description이다. 두 값이 100% 일치한다는 보장은 없지만,
+    // 현 시점 data.go.kr 샘플에서는 동일 문자열로 관찰됨.
+    //
+    // 매칭 전략: **정확 일치만**. substring 매칭은 한국어 공통 어근("조회", "발표",
+    // "목록", "현황")이 많아 false-positive가 심하다.
+    //   예: missing="조회" ↔ recovered="상세기상조회" → substring 어느 방향이든 잘못 매칭.
+    // 정확 일치에서 누락되는 케이스(op_name ↔ summary 형식 차이)는 다음 수집 라운드에서
+    // 동일 list_id를 새로 수집할 때 자연스럽게 재계산되므로 stale 위험은 제한적.
+    let recovered_names: std::collections::HashSet<&str> = new_spec
+        .operations
+        .iter()
+        .map(|op| op.summary.as_str())
+        .collect();
+    merged
+        .missing_operations
+        .retain(|name| !recovered_names.contains(name.as_str()));
+    // new_spec이 여전히 놓친 것이 있으면 추가 (union).
+    // 방어 필터 (Eval R2 Codex W1): recovered에 포함된 이름은 절대 union되지 않도록 가드.
+    // 현재 fetch_gateway_spec은 성공/실패 op를 배타 분리하므로 이 조건은 실제로 발생 안 하지만,
+    // 미래 리팩토링에서 불변이 깨질 때를 대비한 방어층.
+    for still_missing in &new_spec.missing_operations {
+        if !recovered_names.contains(still_missing.as_str())
+            && !merged.missing_operations.contains(still_missing)
+        {
+            merged.missing_operations.push(still_missing.clone());
+        }
+    }
     merged
 }
 

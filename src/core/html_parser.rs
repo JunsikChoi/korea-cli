@@ -169,6 +169,7 @@ pub fn build_api_spec(list_id: &str, parsed_ops: &[ParsedOperation]) -> Option<A
         },
         operations,
         fetched_at,
+        missing_operations: vec![],
     })
 }
 

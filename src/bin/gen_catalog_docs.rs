@@ -84,7 +84,7 @@ fn render_org_page(
     let available: Vec<_> = entries
         .iter()
         .copied()
-        .filter(|e| e.spec_status == SpecStatus::Available)
+        .filter(|e| e.spec_status.is_callable())
         .collect();
     let external: Vec<_> = entries
         .iter()
@@ -94,7 +94,7 @@ fn render_org_page(
     let other: Vec<_> = entries
         .iter()
         .copied()
-        .filter(|e| !matches!(e.spec_status, SpecStatus::Available | SpecStatus::External))
+        .filter(|e| !e.spec_status.is_callable() && e.spec_status != SpecStatus::External)
         .collect();
 
     let mut md = String::new();
@@ -107,28 +107,51 @@ fn render_org_page(
         external.len()
     ));
 
-    // Available
+    // Available (PartialStub 포함)
     if !available.is_empty() {
+        let complete_count = available
+            .iter()
+            .filter(|e| e.spec_status == SpecStatus::Available)
+            .count();
+        let partial_count = available
+            .iter()
+            .filter(|e| e.spec_status == SpecStatus::PartialStub)
+            .count();
         md.push_str(&format!(
-            "## 호출 가능 (Available) — {}개\n\n",
-            available.len()
+            "## 호출 가능 (Available) — {}개 (완전 {} + 부분 {})\n\n",
+            available.len(),
+            complete_count,
+            partial_count
         ));
-        md.push_str("| API | ID | 설명 | 오퍼레이션 |\n");
-        md.push_str("|-----|-----|------|----------|\n");
+        md.push_str("| API | ID | 설명 | 오퍼레이션 | 상태 | 누락 |\n");
+        md.push_str("|-----|-----|------|----------|------|------|\n");
         for e in &available {
-            let ops = specs
-                .get(&e.list_id)
-                .map(|s| s.operations.len())
-                .unwrap_or(0);
+            let spec = specs.get(&e.list_id);
+            let ops = spec.map(|s| s.operations.len()).unwrap_or(0);
             let title = escape_md_table(&e.title);
             let desc = escape_md_table(&e.description);
             let id_link = format!(
                 "[{}](https://www.data.go.kr/data/{}/openapi.do)",
                 e.list_id, e.list_id
             );
+            let (badge, missing) = match e.spec_status {
+                SpecStatus::PartialStub => {
+                    let m = spec
+                        .map(|s| {
+                            if s.missing_operations.is_empty() {
+                                "—".to_string()
+                            } else {
+                                escape_md_table(&s.missing_operations.join(", "))
+                            }
+                        })
+                        .unwrap_or_else(|| "—".to_string());
+                    ("⚠️ 부분", m)
+                }
+                _ => ("✓", "—".to_string()),
+            };
             md.push_str(&format!(
-                "| {} | {} | {} | {} |\n",
-                title, id_link, desc, ops
+                "| {} | {} | {} | {} | {} | {} |\n",
+                title, id_link, desc, ops, badge, missing
             ));
         }
         md.push('\n');
@@ -205,11 +228,17 @@ fn render_readme(
     specs: &HashMap<String, ApiSpec>,
 ) -> String {
     let total_api: usize = groups.values().map(|v| v.len()).sum(); // [W2]
-    let total_available: usize = groups
+    let total_complete: usize = groups
         .values()
         .flat_map(|v| v.iter())
         .filter(|e| e.spec_status == SpecStatus::Available)
         .count();
+    let total_partial: usize = groups
+        .values()
+        .flat_map(|v| v.iter())
+        .filter(|e| e.spec_status == SpecStatus::PartialStub)
+        .count();
+    let total_available = total_complete + total_partial;
     let total_external: usize = groups
         .values()
         .flat_map(|v| v.iter())
@@ -219,8 +248,8 @@ fn render_readme(
     let mut md = String::new();
     md.push_str("# API 카탈로그\n\n");
     md.push_str(&format!(
-        "> **{}개** 공공데이터 API | **{}개** 호출 가능 | **{}개** 외부 링크\n\n",
-        total_api, total_available, total_external
+        "> **{}개** 공공데이터 API | **{}개** 호출 가능 (완전 **{}** + 부분 **{}**) | **{}개** 외부 링크\n\n",
+        total_api, total_available, total_complete, total_partial, total_external
     ));
     md.push_str("이 문서는 [korea-cli](../../README.md) 번들에서 자동 생성되었습니다.\n\n");
     md.push_str("- **호출 가능 (Available)**: `korea-cli call`로 직접 호출 가능한 API\n");
@@ -235,7 +264,7 @@ fn render_readme(
             total: entries.len(),
             available: entries
                 .iter()
-                .filter(|e| e.spec_status == SpecStatus::Available)
+                .filter(|e| e.spec_status.is_callable())
                 .count(),
             external: entries
                 .iter()
@@ -389,6 +418,7 @@ mod tests {
                 },
                 operations: vec![],
                 fetched_at: "2026-04-03".into(),
+                missing_operations: vec![],
             },
         );
         Bundle {
@@ -483,5 +513,116 @@ mod tests {
         assert!(molit_pos < kma_pos);
         // sanitize_filename이 링크에 적용되는지 [B3]
         assert!(content.contains("by-org/국토교통부.md"));
+    }
+
+    fn make_partial_stub_bundle() -> Bundle {
+        let catalog = vec![
+            CatalogEntry {
+                list_id: "100".into(),
+                title: "날씨 API".into(),
+                description: "날씨 조회".into(),
+                keywords: vec!["날씨".into()],
+                org_name: "기상청".into(),
+                category: "기상".into(),
+                request_count: 1000,
+                endpoint_url: "https://apis.data.go.kr/weather".into(),
+                spec_status: SpecStatus::Available,
+            },
+            CatalogEntry {
+                list_id: "101".into(),
+                title: "단기예보 API".into(),
+                description: "단기예보".into(),
+                keywords: vec!["예보".into()],
+                org_name: "기상청".into(),
+                category: "기상".into(),
+                request_count: 800,
+                endpoint_url: "https://apis.data.go.kr/fcst".into(),
+                spec_status: SpecStatus::PartialStub,
+            },
+        ];
+        let mut specs = HashMap::new();
+        specs.insert(
+            "100".into(),
+            ApiSpec {
+                list_id: "100".into(),
+                base_url: "https://apis.data.go.kr/weather".into(),
+                protocol: ApiProtocol::DataGoKrRest,
+                auth: AuthMethod::None,
+                extractor: ResponseExtractor {
+                    data_path: vec![],
+                    error_check: ErrorCheck::HttpStatus,
+                    pagination: None,
+                    format: ResponseFormat::Json,
+                },
+                operations: vec![],
+                fetched_at: "2026-04-05".into(),
+                missing_operations: vec![],
+            },
+        );
+        specs.insert(
+            "101".into(),
+            ApiSpec {
+                list_id: "101".into(),
+                base_url: "https://apis.data.go.kr/fcst".into(),
+                protocol: ApiProtocol::DataGoKrRest,
+                auth: AuthMethod::None,
+                extractor: ResponseExtractor {
+                    data_path: vec![],
+                    error_check: ErrorCheck::HttpStatus,
+                    pagination: None,
+                    format: ResponseFormat::Xml,
+                },
+                operations: vec![],
+                fetched_at: "2026-04-05".into(),
+                missing_operations: vec!["getFcstVersion".into(), "getMidFcst".into()],
+            },
+        );
+        Bundle {
+            metadata: BundleMetadata {
+                version: "test".into(),
+                schema_version: CURRENT_SCHEMA_VERSION,
+                api_count: 2,
+                spec_count: 2,
+                checksum: "test".into(),
+            },
+            catalog,
+            specs,
+        }
+    }
+
+    #[test]
+    fn test_partial_stub_rendered_in_available_section() {
+        let bundle = make_partial_stub_bundle();
+        let groups = group_by_org(&bundle);
+        let content = render_org_page("기상청", &groups["기상청"], &bundle.specs);
+        // Available 섹션에 PartialStub 포함
+        assert!(content.contains("호출 가능"));
+        assert!(content.contains("단기예보 API"));
+        // ⚠️ 부분 배지 표시
+        assert!(content.contains("⚠️ 부분"));
+        // 누락 operation 목록 표시
+        assert!(content.contains("getFcstVersion"));
+        assert!(content.contains("getMidFcst"));
+        // 완전한 API는 ✓ 배지
+        assert!(content.contains("✓"));
+    }
+
+    #[test]
+    fn test_available_statistics_splits_complete_and_partial() {
+        let bundle = make_partial_stub_bundle();
+        let groups = group_by_org(&bundle);
+        let content = render_readme(&groups, &bundle.specs);
+        // "호출 가능 2개 (완전 1개 + 부분 1개)" 형태
+        assert!(content.contains("완전 1") || content.contains("완전 **1"));
+        assert!(content.contains("부분 1") || content.contains("부분 **1"));
+    }
+
+    #[test]
+    fn test_partial_stub_not_in_other_section() {
+        let bundle = make_partial_stub_bundle();
+        let groups = group_by_org(&bundle);
+        let content = render_org_page("기상청", &groups["기상청"], &bundle.specs);
+        // "기타" 섹션이 없어야 함 (모든 엔트리가 Available 또는 External)
+        assert!(!content.contains("## 기타"));
     }
 }

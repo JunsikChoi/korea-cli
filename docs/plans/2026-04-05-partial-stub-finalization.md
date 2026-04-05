@@ -1962,21 +1962,27 @@ git commit -m "docs(devlog): 2026-04-05 Gateway AJAX E2E 스모크 결과 기록
 
 ---
 
+## 진행 상태 (2026-04-06)
+
+**Task 1-8, 10 완료** (feat/partial-stub-finalization, 13 커밋: 7cc6123~18c4699 + eval Round 1-2 fixes).
+**남은 작업**: Task 9 (v4 번들 재생성 + Makefile, 별도 세션), Task 11 (E2E 수동 실행, 사용자 판단).
+
 ## 검증 체크리스트
 
 구현 완료 후 다음을 순서대로 확인:
 
-- [ ] `cargo clippy --all-targets -- -D warnings` — 린트 통과
-- [ ] `cargo fmt -- --check` — 포매팅 통과
-- [ ] `cargo test` — 모든 단위/통합 테스트 PASS
-- [ ] `cargo build --release --bin korea-cli --bin build-bundle --bin verify-bundle --bin gen-catalog-docs` — 모든 바이너리 빌드 성공
-- [ ] `cargo run --bin verify-bundle -- data/bundle.zstd` → "OK: schema_version = 4"
-- [ ] `cargo run --bin gen-catalog-docs -- --bundle data/bundle.zstd --output /tmp/catalog-test && grep -c '호출 가능' /tmp/catalog-test/README.md` — 비어있지 않음
-- [ ] `data/bundle-gateway.zstd` 삭제 확인
-- [ ] `Makefile`, `src/bin/verify_bundle.rs`, `tests/integration/e2e_gateway_smoke.rs` 존재 확인
-- [ ] `data/bundle.zstd`는 git status에서 untracked (.gitignore 정상 적용)
-- [ ] `make update-bundle` + `make verify-bundle-local` 정상 동작
-- [ ] `git log --oneline -12` — 의미 있는 커밋 메시지 (Task 1~10 각 1커밋 + devlog)
+- [x] `cargo test` — 모든 단위/통합 테스트 PASS (210/210, E2E `#[ignore]` 1개 제외)
+- [x] `cargo build --release --bin korea-cli --bin build-bundle --bin verify-bundle --bin gen-catalog-docs` — 모든 바이너리 빌드 성공
+- [x] `data/bundle-gateway.zstd` 삭제 확인 (커밋 7cc6123)
+- [x] `src/bin/verify_bundle.rs`, `tests/integration/e2e_gateway_smoke.rs` 존재 확인
+- [x] `data/bundle.zstd`는 git status에서 untracked (.gitignore 정상 적용)
+- [x] `git log --oneline -12` — 의미 있는 커밋 메시지 (Task 1~10 + eval fixes)
+- [ ] `cargo clippy --all-targets -- -D warnings` — 프로젝트 전체 clippy는 기존 dead_code 경고 있음(우리 변경분 clean)
+- [ ] `cargo fmt -- --check` — build.rs에 기존 포맷 이슈(우리 변경분 rustfmt 적용됨)
+- [ ] `cargo run --bin verify-bundle -- data/bundle.zstd` → "OK: schema_version = 4" — **Task 9 이후** (현재는 placeholder/v3이라 의도적 실패)
+- [ ] `cargo run --bin gen-catalog-docs` — **Task 9 이후** (v4 번들 필요)
+- [ ] `Makefile` 존재 확인 — **Task 9에서 생성 예정**
+- [ ] `make update-bundle` + `make verify-bundle-local` 정상 동작 — **Task 9**
 
 ## 알려진 미결정 사항 (후속)
 

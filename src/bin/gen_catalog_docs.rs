@@ -389,6 +389,7 @@ mod tests {
                 },
                 operations: vec![],
                 fetched_at: "2026-04-03".into(),
+                missing_operations: vec![],
             },
         );
         Bundle {

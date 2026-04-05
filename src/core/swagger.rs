@@ -107,6 +107,7 @@ pub fn parse_swagger(list_id: &str, spec: &Value) -> Result<ApiSpec> {
         extractor,
         operations,
         fetched_at,
+        missing_operations: vec![],
     })
 }
 

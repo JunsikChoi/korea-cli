@@ -32,6 +32,7 @@ fn make_test_spec() -> ApiSpec {
             response_fields: vec![],
         }],
         fetched_at: "2024-01-01".into(),
+        missing_operations: vec![],
     }
 }
 

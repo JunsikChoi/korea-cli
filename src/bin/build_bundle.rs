@@ -569,12 +569,23 @@ async fn fetch_gateway_spec(
     }
 
     match build_api_spec(list_id, &parsed_ops) {
-        Some(spec) => SpecResult::Spec {
-            spec: Box::new(spec),
-            is_gateway: true,
-            is_partial,
-            failed_ops,
-        },
+        Some(mut spec) => {
+            // PartialStub일 때 failed_ops를 missing_operations로 변환
+            // op_name 빈 문자열은 필터링 (W-Back2 대응)
+            if is_partial {
+                spec.missing_operations = failed_ops
+                    .iter()
+                    .filter(|f| !f.op_name.trim().is_empty())
+                    .map(|f| f.op_name.clone())
+                    .collect();
+            }
+            SpecResult::Spec {
+                spec: Box::new(spec),
+                is_gateway: true,
+                is_partial,
+                failed_ops,
+            }
+        }
         None => SpecResult::Bail {
             reason: format!(
                 "Gateway build_api_spec 실패 ({}/{total_ops} ops)",
@@ -818,6 +829,29 @@ fn merge_operations(existing: &ApiSpec, new_spec: &ApiSpec) -> ApiSpec {
         }
     }
     merged.fetched_at = new_spec.fetched_at.clone();
+    // Round 1 W1 / Round 2 W-R2-1: retry로 복구된 op의 이름을 missing_operations에서 제거.
+    //
+    // 주의: missing_operations에 들어간 값은 FailedOp.op_name (드롭다운 select 텍스트)이고,
+    // Operation.summary는 AJAX 상세 응답의 description이다. 두 값이 100% 일치한다는 보장은 없지만,
+    // 현 시점 data.go.kr 샘플에서는 동일 문자열로 관찰됨.
+    // → substring 매칭 + 정확히 일치 매칭을 둘 다 적용해 false-stale 최소화.
+    let recovered_names: std::collections::HashSet<&str> = new_spec
+        .operations
+        .iter()
+        .map(|op| op.summary.as_str())
+        .collect();
+    merged.missing_operations.retain(|name| {
+        !recovered_names.contains(name.as_str())
+            && !recovered_names
+                .iter()
+                .any(|r| r.contains(name.as_str()) || name.contains(*r))
+    });
+    // new_spec이 여전히 놓친 것이 있으면 추가 (union)
+    for still_missing in &new_spec.missing_operations {
+        if !merged.missing_operations.contains(still_missing) {
+            merged.missing_operations.push(still_missing.clone());
+        }
+    }
     merged
 }
 

@@ -25,7 +25,7 @@ if [ -n "${BUNDLE_TAG:-}" ]; then
   echo "지정된 번들 태그: $TAG"
 else
   TAG=$(gh release list --limit 20 --json tagName \
-    --jq '[.[].tagName | select(startswith("bundle-"))][0]' \
+    --jq '[.[].tagName | select(startswith("bundle-"))][0] // empty' \
     --repo "$REPO")
   if [ -z "$TAG" ]; then
     echo "오류: bundle-* 릴리즈를 찾을 수 없습니다."
@@ -40,7 +40,7 @@ if ! gh release download "$TAG" --pattern bundle.zstd --dir data --clobber --rep
   echo "오류: 번들 다운로드 실패"
   exit 1
 fi
-echo "번들 다운로드 완료: $(du -sh $BUNDLE_PATH | cut -f1)"
+echo "번들 다운로드 완료: $(du -sh "$BUNDLE_PATH" | cut -f1)"
 
 # 1.5. 번들 schema_version 검증
 cargo run --quiet --bin verify-bundle -- "$BUNDLE_PATH" || {
@@ -57,11 +57,25 @@ MAX_BUNDLE_SIZE=$((6 * 1024 * 1024))  # 6MB (나머지 소스 코드 여유분 �
 if [ "$BUNDLE_SIZE" -gt "$MAX_BUNDLE_SIZE" ]; then
   echo "경고: 번들 크기가 ${BUNDLE_SIZE}바이트로 6MB를 초과합니다."
   echo "crates.io 전체 패키지 10MB 제한에 근접할 수 있습니다."
-  echo "계속하려면 Enter, 중단하려면 Ctrl+C"
-  read -r
+  if [ -t 0 ]; then
+    echo "계속하려면 Enter, 중단하려면 Ctrl+C"
+    read -r
+  else
+    echo "비대화형 환경 — 경고만 출력하고 계속 진행"
+  fi
 fi
 
-# 3. cargo publish
+# 3. cargo publish (--allow-dirty: data/bundle.zstd가 .gitignore 대상이라 필요)
+DIRTY_SRC=$(git diff --name-only HEAD -- src/ build.rs 2>/dev/null || true)
+if [ -n "$DIRTY_SRC" ]; then
+  echo "경고: 커밋되지 않은 소스 변경이 있습니다:"
+  echo "$DIRTY_SRC"
+  if [ "${FORCE_DIRTY:-0}" != "1" ]; then
+    echo "계속하려면 FORCE_DIRTY=1 설정"
+    exit 1
+  fi
+fi
+
 if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "DRY_RUN=1 — cargo publish --dry-run 실행"
   cargo publish --dry-run --allow-dirty

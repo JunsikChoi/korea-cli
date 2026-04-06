@@ -8,13 +8,13 @@ REPO ?= JunsikChoi/korea-cli
 # Round 1 B2: v3 번들로 덮어써서 임베드 번들 panic 유발 방지.
 update-bundle:
 	@mkdir -p data; \
-	BUNDLE_TAG=$$(gh release list --repo $(REPO) --limit 20 --json tagName \
+	BUNDLE_TAG=$$(gh release list --repo '$(REPO)' --limit 20 --json tagName \
 	  --jq '[.[].tagName | select(startswith("bundle-"))][0] // empty'); \
 	if [ -z "$$BUNDLE_TAG" ]; then \
 	  echo "ERROR: bundle-* 릴리즈를 찾을 수 없음"; exit 1; \
 	fi; \
 	echo "다운로드: $$BUNDLE_TAG"; \
-	if ! gh release download "$$BUNDLE_TAG" --repo $(REPO) \
+	if ! gh release download "$$BUNDLE_TAG" --repo '$(REPO)' \
 	  --pattern bundle.zstd --dir data --clobber; then \
 	  rm -f data/bundle.zstd; \
 	  echo "ERROR: 다운로드 실패 — 부분 파일 삭제"; \

@@ -169,6 +169,7 @@ korea-cli/
 │       ├── analyze_pages.rs     # HTML 구조 신호 추출기
 │       ├── summarize_signals.rs # 신호 빈도 분석 + 클러스터링
 │       └── gen_catalog_docs.rs  # API 카탈로그 markdown 문서 생성
+├── Makefile             # 개발 DX (make update-bundle, make verify-bundle-local)
 ├── build.rs             # 번들 해결 (로컬 → BUNDLE_DOWNLOAD_URL env → placeholder 3단계)
 ├── tests/               # 통합 테스트
 ├── scripts/

@@ -1964,8 +1964,8 @@ git commit -m "docs(devlog): 2026-04-05 Gateway AJAX E2E 스모크 결과 기록
 
 ## 진행 상태 (2026-04-06)
 
-**Task 1-8, 10 완료** (feat/partial-stub-finalization, 13 커밋: 7cc6123~18c4699 + eval Round 1-2 fixes).
-**남은 작업**: Task 9 (v4 번들 재생성 + Makefile, 별도 세션), Task 11 (E2E 수동 실행, 사용자 판단).
+**Task 1-8, 9, 10 완료**. Task 9는 feat/task-9-makefile 브랜치에서 4커밋 (de996f4~2457f34 + eval fixes).
+**남은 작업**: Task 11 (E2E 수동 실행, 사용자 판단).
 
 ## 검증 체크리스트
 
@@ -1979,10 +1979,10 @@ git commit -m "docs(devlog): 2026-04-05 Gateway AJAX E2E 스모크 결과 기록
 - [x] `git log --oneline -12` — 의미 있는 커밋 메시지 (Task 1~10 + eval fixes)
 - [ ] `cargo clippy --all-targets -- -D warnings` — 프로젝트 전체 clippy는 기존 dead_code 경고 있음(우리 변경분 clean)
 - [ ] `cargo fmt -- --check` — build.rs에 기존 포맷 이슈(우리 변경분 rustfmt 적용됨)
-- [ ] `cargo run --bin verify-bundle -- data/bundle.zstd` → "OK: schema_version = 4" — **Task 9 이후** (현재는 placeholder/v3이라 의도적 실패)
-- [ ] `cargo run --bin gen-catalog-docs` — **Task 9 이후** (v4 번들 필요)
-- [ ] `Makefile` 존재 확인 — **Task 9에서 생성 예정**
-- [ ] `make update-bundle` + `make verify-bundle-local` 정상 동작 — **Task 9**
+- [x] `cargo run --bin verify-bundle -- data/bundle.zstd` → "OK: schema_version = 4"
+- [x] `cargo run --bin gen-catalog-docs` — 12135 API, 5547 specs, 406 기관
+- [x] `Makefile` 존재 확인
+- [x] `make update-bundle` + `make verify-bundle-local` 정상 동작
 
 ## 알려진 미결정 사항 (후속)
 

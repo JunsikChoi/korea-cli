@@ -97,7 +97,7 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 **번들 인프라 정비:**
 - [x] 번들 v3 스키마 교체 (`data/bundle.zstd` 최신화)
 - [x] orphan `bundle-gateway.zstd` 정리
-- [ ] `Makefile update-bundle` 헬퍼 추가 (Release → 로컬 번들 동기화)
+- [x] `Makefile update-bundle` 헬퍼 추가 (Release → 로컬 번들 동기화)
 
 **번들 배포 파이프라인 (Option A': 임베드 유지 + DX/CI 개선):**
 - [ ] `build.rs` 3단계 fallback (로컬 → `BUNDLE_DOWNLOAD_URL` env → placeholder)
@@ -112,7 +112,7 @@ AI 에이전트(Codex, Claude Code, Claude Desktop, Cursor)가 주 사용자.
 - [x] v3 번들 graceful fallback 테스트
 - [x] `verify-bundle` 바이너리 + release.yml schema gate 추가
 - [x] `bundle.rs` embedded bundle 사용자 친화적 panic 메시지
-- [ ] CI 재빌드 트리거로 v4 번들 Release 생성 (Task 9, 별도 세션)
+- [x] CI 재빌드 트리거로 v4 번들 Release 생성 (Task 9, 별도 세션)
 
 **E2E 스모크 테스트:**
 - [x] `tests/integration/e2e_gateway_smoke.rs` (Gateway AJAX Available 5개)

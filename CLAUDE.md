@@ -38,6 +38,7 @@ src/
     └── release.yml      # 바이너리 릴리즈 CI (4 플랫폼 크로스 빌드)
 scripts/
 └── publish.sh           # crates.io 배포 (번들 다운로드 → cargo publish)
+Makefile                 # 개발 DX (make update-bundle, make verify-bundle-local)
 build.rs                 # 번들 해결 3단계 (로컬 → BUNDLE_DOWNLOAD_URL → placeholder)
 ```
 

@@ -38,6 +38,15 @@ mkdir -p data
 gh release download "$TAG" --pattern bundle.zstd --dir data --clobber --repo "$REPO"
 echo "번들 다운로드 완료: $(du -sh $BUNDLE_PATH | cut -f1)"
 
+# 1.5. 번들 schema_version 검증
+cargo run --quiet --bin verify-bundle -- "$BUNDLE_PATH" || {
+  echo "오류: 번들 schema_version이 현재 바이너리와 불일치합니다."
+  echo "번들 또는 코드를 업데이트한 후 다시 시도하세요."
+  rm -f "$BUNDLE_PATH"
+  exit 1
+}
+echo "번들 schema 검증 통과"
+
 # 2. 번들 크기 검증 (crates.io 10MB 제한 기준으로 전체 패키지 크기 추정)
 BUNDLE_SIZE=$(stat -c%s "$BUNDLE_PATH" 2>/dev/null || stat -f%z "$BUNDLE_PATH")
 MAX_BUNDLE_SIZE=$((6 * 1024 * 1024))  # 6MB (나머지 소스 코드 여유분 포함)

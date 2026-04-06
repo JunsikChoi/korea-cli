@@ -35,7 +35,11 @@ else
 fi
 
 mkdir -p data
-gh release download "$TAG" --pattern bundle.zstd --dir data --clobber --repo "$REPO"
+if ! gh release download "$TAG" --pattern bundle.zstd --dir data --clobber --repo "$REPO"; then
+  rm -f "$BUNDLE_PATH"
+  echo "오류: 번들 다운로드 실패"
+  exit 1
+fi
 echo "번들 다운로드 완료: $(du -sh $BUNDLE_PATH | cut -f1)"
 
 # 1.5. 번들 schema_version 검증
